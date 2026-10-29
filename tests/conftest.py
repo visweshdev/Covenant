@@ -15,6 +15,12 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path_factory, monkeypatch):
+    """Never touch the real ~/.covenant during tests."""
+    monkeypatch.setenv("COVENANT_HOME", str(tmp_path_factory.mktemp("covenant-home")))
+
+
 @pytest.fixture
 def mylib_repo(tmp_path: Path) -> Path:
     """A fresh git copy of examples/mylib with one baseline commit."""

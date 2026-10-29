@@ -1,19 +1,21 @@
 """The runtime: judges every event against the approved Covenant. No LLM is involved.
 
-State lives in `state_dir` so separate processes (git hooks, the shell wrapper,
-`covenant check`) share one trace:
+State lives in `state_dir` (outside the repo by default, see paths.py) so separate
+processes (Claude Code hooks, git hooks, the CLI) share one trace:
 
-    session.json   start time and pinned baseline commits
-    trace.jsonl    every event that happened, replayed on load
-    reports.jsonl  every decision that raised a violation, for audit
-    snapshot/      copies of protected files, for rollback
-
-In the full design `state_dir` sits outside the agent's writable sandbox.
+    session.json            start time, pinned baselines, hashes of Covenant's own files
+    covenant.approved.yaml  the Covenant as approved at start; edits to the repo copy don't count
+    trace.jsonl             every event that happened, replayed on load
+    reports.jsonl           every decision that raised a violation, for audit
+    snapshot/               copies of protected files, for rollback
+    lock                    serializes concurrent hooks
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import subprocess
 from collections import Counter
 from collections.abc import Callable
@@ -25,14 +27,20 @@ from typing import Any
 from .events import EVENT_ADAPTER, GATED_EVENTS, Effect, Event, TestRun
 from .feedback import ViolationReport
 from .ir import Clause, ClauseKind, Covenant, OnViolation
+from .locking import file_lock
 from .monitors.effects import EffectMonitor
 from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import TraceMonitor
-from .verifiers import api_surface
+from .paths import claude_settings_files, default_state_dir
+from .verifiers import api_surface, ts_api_surface
 from .verifiers.test_gate import run_tests
 
 SemanticVerifier = Callable[[Clause, Path, "str | None"], list[ViolationReport]]
-SEMANTIC_VERIFIERS: dict[str, SemanticVerifier] = {"api_surface_diff": api_surface.verify}
+SEMANTIC_VERIFIERS: dict[str, SemanticVerifier] = {
+    "api_surface_diff": api_surface.verify,
+    "ts_api_surface_diff": ts_api_surface.verify,
+}
+MISSING = "<missing>"
 
 
 @dataclass
@@ -44,6 +52,10 @@ class Decision:
     @property
     def escalated(self) -> bool:
         return any(r.escalated or r.on_violation is OnViolation.ASK_HUMAN for r in self.reports)
+
+    @property
+    def blocking(self) -> list[ViolationReport]:
+        return [r for r in self.reports if not is_resolved(r)]
 
     @property
     def exit_code(self) -> int:
@@ -60,9 +72,13 @@ class Decision:
         }
 
 
-def _is_resolved(report: ViolationReport) -> bool:
+def is_resolved(report: ViolationReport) -> bool:
     """An effect that was rolled back successfully no longer needs to block anything."""
     return report.kind is ClauseKind.EFFECT_PROHIBITION and report.evidence.get("rolled_back") is True
+
+
+def _file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else MISSING
 
 
 class Runtime:
@@ -72,31 +88,57 @@ class Runtime:
         repo_root: str | Path,
         state_dir: str | Path | None = None,
         escalate_after: int = 3,
+        covenant_path: str | Path | None = None,
     ):
-        self.covenant = covenant
         self.repo_root = Path(repo_root).resolve()
-        self.state_dir = Path(state_dir).resolve() if state_dir else self.repo_root / ".covenant"
+        self.state_dir = Path(state_dir).resolve() if state_dir else default_state_dir(self.repo_root)
+        self.covenant_path = Path(covenant_path).resolve() if covenant_path else self.repo_root / "covenant.yaml"
         self.escalate_after = escalate_after
+        self._configure(covenant)
+        with self._lock():
+            self._load_state()
+
+    @classmethod
+    def open(
+        cls,
+        repo_root: str | Path,
+        covenant_path: str | Path | None = None,
+        state_dir: str | Path | None = None,
+        pinned: bool = True,
+        **kwargs: Any,
+    ) -> Runtime | None:
+        """Load the approved Covenant for a repo (or the repo's file if none is approved yet)."""
+        repo = Path(repo_root).resolve()
+        cov_path = Path(covenant_path).resolve() if covenant_path else repo / "covenant.yaml"
+        sdir = Path(state_dir).resolve() if state_dir else default_state_dir(repo)
+        approved = sdir / "covenant.approved.yaml"
+        if pinned and approved.exists():
+            covenant = Covenant.load(approved)
+        elif cov_path.exists():
+            covenant = Covenant.load(cov_path)
+        else:
+            return None
+        return cls(covenant, repo, sdir, covenant_path=cov_path, **kwargs)
+
+    def _configure(self, covenant: Covenant) -> None:
+        self.covenant = covenant
         self.effect_monitors = [
             EffectMonitor(c, self.repo_root) for c in covenant.enforced(ClauseKind.EFFECT_PROHIBITION)
         ]
         self.semantic_clauses = covenant.enforced(ClauseKind.SEMANTIC_INVARIANT)
-        self.snapshotter = CopySnapshotter(self.state_dir, self.repo_root)
-        self._load_state()
 
     # ----- state -------------------------------------------------------------
 
-    @property
-    def _trace_path(self) -> Path:
-        return self.state_dir / "trace.jsonl"
+    def _lock(self):
+        return file_lock(self.state_dir / "lock")
 
     @property
-    def _reports_path(self) -> Path:
-        return self.state_dir / "reports.jsonl"
+    def has_session(self) -> bool:
+        return (self.state_dir / "session.json").exists()
 
     @property
-    def _session_path(self) -> Path:
-        return self.state_dir / "session.json"
+    def approved_path(self) -> Path:
+        return self.state_dir / "covenant.approved.yaml"
 
     def _fresh_monitors(self) -> None:
         self.trace_monitors = [
@@ -105,44 +147,73 @@ class Runtime:
         ]
         self.trace: list[Event] = []
 
+    def _read_lines(self, name: str) -> list[str]:
+        path = self.state_dir / name
+        if not path.exists():
+            return []
+        return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
     def _load_state(self) -> None:
         self._fresh_monitors()
-        self.session: dict[str, Any] = {}
-        if self._session_path.exists():
-            self.session = json.loads(self._session_path.read_text(encoding="utf-8"))
-        if self._trace_path.exists():
-            for line in self._trace_path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    event = EVENT_ADAPTER.validate_json(line)
-                    for _, monitor in self.trace_monitors:
-                        monitor.step(event)
-                    self.trace.append(event)
+        self.snapshotter = CopySnapshotter(self.state_dir, self.repo_root)
+        session_path = self.state_dir / "session.json"
+        self.session: dict[str, Any] = (
+            json.loads(session_path.read_text(encoding="utf-8")) if session_path.exists() else {}
+        )
+        for line in self._read_lines("trace.jsonl"):
+            event = EVENT_ADAPTER.validate_json(line)
+            for _, monitor in self.trace_monitors:
+                monitor.step(event)
+            self.trace.append(event)
         self.block_counts: Counter[str] = Counter()
-        if self._reports_path.exists():
-            for line in self._reports_path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    self.block_counts.update(json.loads(line).get("counted", []))
+        for line in self._read_lines("reports.jsonl"):
+            self.block_counts.update(json.loads(line).get("counted", []))
 
-    def start(self) -> dict[str, Any]:
-        """Begin a task: clear the trace, snapshot protected data, pin baselines."""
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        for path in (self._trace_path, self._reports_path):
-            path.unlink(missing_ok=True)
-        self._fresh_monitors()
-        self.block_counts = Counter()
-        baselines = {}
-        for clause in self.semantic_clauses:
-            ref = clause.params.get("baseline")
-            if ref:
-                baselines[clause.id] = self._git_rev_parse(ref)
-        files = self.snapshotter.take(self.effect_monitors)
-        self.session = {
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "baselines": baselines,
-            "snapshot_files": files,
-        }
-        self._session_path.write_text(json.dumps(self.session, indent=2), encoding="utf-8")
-        return self.session
+    def _integrity_files(self) -> list[Path]:
+        hooks = self.repo_root / ".git" / "hooks"
+        return [self.covenant_path, hooks / "pre-commit", hooks / "pre-push", claude_settings_files(self.repo_root)[0]]
+
+    def start(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Begin a task: approve the Covenant file, reset the trace, snapshot data, pin baselines."""
+        with self._lock():
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            if self.covenant_path.exists():
+                self._configure(Covenant.load(self.covenant_path))
+                shutil.copyfile(self.covenant_path, self.approved_path)
+            for name in ("trace.jsonl", "reports.jsonl"):
+                (self.state_dir / name).unlink(missing_ok=True)
+            self._fresh_monitors()
+            self.block_counts = Counter()
+            baselines = {}
+            for clause in self.semantic_clauses:
+                ref = clause.params.get("baseline")
+                if ref:
+                    baselines[clause.id] = self._git_rev_parse(ref)
+            self.snapshotter = CopySnapshotter(self.state_dir, self.repo_root)
+            files = self.snapshotter.take(self.effect_monitors)
+            self.session = {
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "repo": str(self.repo_root),
+                "baselines": baselines,
+                "snapshot_files": files,
+                "integrity": {str(p): _file_hash(p) for p in self._integrity_files()},
+                **(extra or {}),
+            }
+            self._write_session()
+            return self.session
+
+    def _write_session(self) -> None:
+        (self.state_dir / "session.json").write_text(json.dumps(self.session, indent=2), encoding="utf-8")
+
+    def update_session(self, **values: Any) -> None:
+        with self._lock():
+            self._load_state()
+            self.session.update(values)
+            self._write_session()
+
+    def repo_covenant_changed(self) -> bool:
+        """True when the repo's Covenant file differs from the approved copy."""
+        return self.approved_path.exists() and _file_hash(self.covenant_path) != _file_hash(self.approved_path)
 
     def _git_rev_parse(self, ref: str) -> str:
         result = subprocess.run(
@@ -156,63 +227,118 @@ class Runtime:
 
     # ----- judging events ----------------------------------------------------
 
-    def record(self, event: Event) -> Decision:
-        """Judge an event. Gated events (commit, push) are refused if anything blocks."""
-        reports = self._handle_effects(self.snapshotter.scan())
-        own_effect_reports: list[ViolationReport] = []
-        if isinstance(event, Effect):
-            own_effect_reports = self._handle_effects([event])
-            reports += own_effect_reports
+    def record(self, event: Event, dry_run: bool = False) -> Decision:
+        """Judge an event. Gated events (commit, push) are refused if anything blocks.
 
-        gated = event.type in GATED_EVENTS
-        pending = []
-        for clause, monitor in self.trace_monitors:
-            ok, state = monitor.peek(event)
-            pending.append(state)
-            if not ok:
-                reports.append(self._trace_report(clause, event))
-        if gated:
-            reports += self._semantic_reports()
+        With dry_run, the event is judged but not added to the trace: used to check a
+        commit before it runs, leaving the authoritative record to the git hook.
+        """
+        with self._lock():
+            self._load_state()
+            reports = self._integrity_reports()
+            reports += self._handle_effects(self.snapshotter.scan())
+            own_effect_reports: list[ViolationReport] = []
+            if isinstance(event, Effect):
+                own_effect_reports = self._handle_effects([event])
+                reports += own_effect_reports
 
-        blocking = [r for r in reports if not _is_resolved(r)]
-        refused = gated and bool(blocking)
-        if refused:
-            for r in blocking:
-                r.blocked_action = f"git {event.type}"
-        else:  # the event happened (or is about to): add it to the trace
-            for (_, monitor), state in zip(self.trace_monitors, pending):
-                monitor.advance(state)
-            self.trace.append(event)
-            self.state_dir.mkdir(parents=True, exist_ok=True)
-            with self._trace_path.open("a", encoding="utf-8") as f:
-                f.write(event.model_dump_json() + "\n")
+            gated = event.type in GATED_EVENTS
+            pending = []
+            for clause, monitor in self.trace_monitors:
+                ok, state = monitor.peek(event)
+                pending.append(state)
+                if not ok:
+                    reports.append(self._trace_report(clause, event))
+            if gated:
+                reports += self._semantic_reports()
 
-        allowed = not refused and not own_effect_reports
-        decision = Decision(event.type, allowed, reports)
-        self._log(decision)
-        return decision
+            blocking = [r for r in reports if not is_resolved(r)]
+            refused = gated and bool(blocking)
+            if refused:
+                for r in blocking:
+                    r.blocked_action = f"git {event.type}"
+            elif not dry_run:
+                for (_, monitor), state in zip(self.trace_monitors, pending):
+                    monitor.advance(state)
+                self.trace.append(event)
+                self.state_dir.mkdir(parents=True, exist_ok=True)
+                with (self.state_dir / "trace.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(event.model_dump_json() + "\n")
+
+            decision = Decision(event.type, not refused and not own_effect_reports, reports)
+            self._log(decision)
+            return decision
+
+    def would_violate(self, effect: Effect) -> list[ViolationReport]:
+        """Reports for an effect that has not happened yet, so it can be denied up front."""
+        return [
+            ViolationReport.for_clause(m.clause, {"op": effect.op, "target": effect.target, "channel": effect.channel})
+            for m in self.effect_monitors
+            if m.violates(effect)
+        ]
 
     def check(self, checkpoint: str = "manual") -> Decision:
-        """Run every semantic verifier now, without adding an event. The agent may call this early."""
-        reports = self._handle_effects(self.snapshotter.scan()) + self._semantic_reports()
-        decision = Decision(f"check:{checkpoint}", not any(not _is_resolved(r) for r in reports), reports)
-        self._log(decision)
-        return decision
+        """Run every check now without adding an event. Used at task end, and by the agent early."""
+        with self._lock():
+            self._load_state()
+            reports = (
+                self._integrity_reports()
+                + self._handle_effects(self.snapshotter.scan())
+                + self._semantic_reports()
+            )
+            decision = Decision(f"check:{checkpoint}", not any(not is_resolved(r) for r in reports), reports)
+            self._log(decision)
+            return decision
+
+    @property
+    def test_commands(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                c.params["test_cmd"]
+                for c in self.covenant.enforced(ClauseKind.TEMPORAL_OBLIGATION)
+                if "test_cmd" in c.params
+            )
+        )
 
     def run_tests(self) -> list[tuple[Decision, str]]:
         """Run each distinct test_cmd declared by temporal clauses and record the results."""
-        commands = list(
-            dict.fromkeys(c.params["test_cmd"] for c, _ in self.trace_monitors if "test_cmd" in c.params)
-        )
-        if not commands:
+        if not self.test_commands:
             raise ValueError("no clause declares a test_cmd")
         results = []
-        for cmd in commands:
+        for cmd in self.test_commands:
             event, output = run_tests(cmd, self.repo_root)
             results.append((self.record(event), output))
         return results
 
     # ----- helpers -----------------------------------------------------------
+
+    def _integrity_reports(self) -> list[ViolationReport]:
+        problems: list[dict[str, Any]] = []
+        for path, expected in self.session.get("integrity", {}).items():
+            found = _file_hash(Path(path))
+            if found != expected:
+                problems.append({"path": path, "problem": "changed since approval" if found != MISSING else "deleted"})
+        for settings in claude_settings_files(self.repo_root):
+            try:
+                if json.loads(settings.read_text(encoding="utf-8")).get("disableAllHooks"):
+                    problems.append({"path": str(settings), "problem": "disableAllHooks is set"})
+            except (OSError, ValueError, AttributeError):
+                pass
+        git_config = self.repo_root / ".git" / "config"
+        if git_config.is_file() and "hookspath" in git_config.read_text(encoding="utf-8", errors="ignore").lower():
+            problems.append({"path": str(git_config), "problem": "core.hooksPath redirects git hooks"})
+        return [
+            ViolationReport(
+                violation="INTEGRITY",
+                clause="Covenant's own files must not change during a task",
+                checker="integrity",
+                on_violation=OnViolation.ASK_HUMAN,
+                evidence=p,
+                repair_hints=["Restore the file. Only a human can change Covenant's setup (`covenant start` re-approves it)"],
+                options=["ask_human"],
+            )
+            for p in problems
+        ]
 
     def _handle_effects(self, effects: list[Effect]) -> list[ViolationReport]:
         reports = []
@@ -262,7 +388,7 @@ class Runtime:
     def _log(self, decision: Decision) -> None:
         if not decision.reports:
             return
-        counted = sorted({r.violation for r in decision.reports if not _is_resolved(r)})
+        counted = sorted({r.violation for r in decision.blocking})
         self.block_counts.update(counted)
         for r in decision.reports:
             if r.violation in counted and self.block_counts[r.violation] >= self.escalate_after:
@@ -270,5 +396,5 @@ class Runtime:
                 r.options = ["ask_human"]
         self.state_dir.mkdir(parents=True, exist_ok=True)
         entry = {"ts": datetime.now(timezone.utc).isoformat(), "counted": counted, **decision.to_dict()}
-        with self._reports_path.open("a", encoding="utf-8") as f:
+        with (self.state_dir / "reports.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")

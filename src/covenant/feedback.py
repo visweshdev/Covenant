@@ -10,9 +10,9 @@ from .ir import Clause, ClauseKind, OnViolation
 
 
 class ViolationReport(BaseModel):
-    violation: str  # clause id
+    violation: str  # clause id, or INTEGRITY for tampering with Covenant itself
     clause: str  # the instruction words the clause came from
-    kind: ClauseKind
+    kind: ClauseKind | None = None
     checker: str
     on_violation: OnViolation
     blocked_action: str | None = None
@@ -43,7 +43,7 @@ class ViolationReport(BaseModel):
 
 def default_hints(clause: Clause, evidence: dict[str, Any]) -> list[str]:
     checker = clause.checker
-    if checker == "api_surface_diff":
+    if checker in ("api_surface_diff", "ts_api_surface_diff"):
         if evidence.get("after") is None:
             return [
                 "Restore the removed name, or keep a deprecated alias that points to its replacement",

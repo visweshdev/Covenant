@@ -38,6 +38,11 @@ REGISTRY: dict[str, CheckerSpec] = {
             "Exported names and signatures unchanged versus a baseline commit",
             ("package",),
         ),
+        CheckerSpec(
+            "ts_api_surface_diff",
+            ClauseKind.SEMANTIC_INVARIANT,
+            "TypeScript exported names and types unchanged versus a baseline commit",
+        ),
     ]
 }
 
