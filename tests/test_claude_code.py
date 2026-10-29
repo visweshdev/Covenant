@@ -231,3 +231,23 @@ def test_hook_command_runs_in_powershell_and_bash(tmp_path):
         r = subprocess.run(shell + [handler["command"]], input="{}", capture_output=True, text=True,
                            env={**os.environ, "PYTHONPATH": str(SRC)})
         assert r.returncode == 0, (shell[0], r.stderr[-500:])
+
+
+def test_powershell_tool_gets_the_same_checks(hook, mylib_repo):
+    assert denied(pre(hook, "PowerShell", command="git commit -m x"))
+    assert denied(pre(hook, "PowerShell", command="Remove-Item covenant.yaml"))
+    assert denied(pre(hook, "PowerShell", command="git commit --no-verify -m x"))
+    post(hook, "PowerShell", command=TEST_CMD)
+    assert pre(hook, "PowerShell", command="git commit -m x") == {}
+    users = mylib_repo / "data" / "users.json"
+    users.unlink()
+    out = post(hook, "PowerShell", command="rm data/users.json")
+    assert out["decision"] == "block" and "restored" in out["reason"] and users.exists()
+
+
+def test_installed_matchers_cover_powershell(tmp_path):
+    settings = tmp_path / ".claude" / "settings.json"
+    install(tmp_path, settings, on_failure_block=False)
+    hooks = json.loads(settings.read_text())["hooks"]
+    for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        assert "PowerShell" in hooks[event][0]["matcher"].split("|")

@@ -129,3 +129,10 @@ def test_verifier_that_cannot_run_fails_closed(mylib_repo, tmp_path):
     d = rt.record(Commit())
     assert not d.allowed
     assert any("error" in r.evidence for r in d.reports if r.violation == "C1")
+
+
+def test_additive_api_change_is_allowed(mylib_repo, tmp_path):
+    rt = runtime(mylib_repo, tmp_path)
+    core = mylib_repo / "mylib" / "core.py"
+    core.write_text(core.read_text().replace(OLD_SIG, "def parse(text: str, strict: bool = False, *, mode: str = 'lenient') -> Doc:"))
+    assert [r for r in rt.check().reports if r.violation == "C1"] == []

@@ -271,6 +271,12 @@ class Runtime:
             self._log(decision)
             return decision
 
+    def integrity_reports(self) -> list[ViolationReport]:
+        """Tampering checks only (Covenant's own files, hook bypass settings)."""
+        with self._lock():
+            self._load_state()
+            return self._integrity_reports()
+
     def would_violate(self, effect: Effect) -> list[ViolationReport]:
         """Reports for an effect that has not happened yet, so it can be denied up front."""
         target = normalize_path(effect.target, self.repo_root) if effect.channel == "fs" else effect.target

@@ -16,6 +16,7 @@ Clause params:
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -167,6 +168,67 @@ class ApiDiff:
     changed: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
+def _parse_sig(sig: str) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef] | None:
+    """Split "@deco def f(a, b=1) -> T" into its decorators and a parsed function node."""
+    m = re.match(r"^((?:@\S+\s+)*)((?:async\s+)?def\s.*)$", sig, re.S)
+    if not m:
+        return None
+    try:
+        node = ast.parse(m.group(2) + ":\n    pass").body[0]
+    except SyntaxError:
+        return None
+    return (m.group(1), node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+
+
+def _src(node: ast.AST | None) -> str | None:
+    return None if node is None else ast.unparse(node)
+
+
+def signatures_compatible(before: str, after: str) -> bool:
+    """True when every call that worked against `before` still works the same against `after`.
+
+    Old parameters keep their name, position, kind, annotation and default; new parameters
+    are optional; *args/**kwargs are kept; decorators and the return annotation are unchanged.
+    """
+    parsed = _parse_sig(before), _parse_sig(after)
+    if None in parsed:
+        return False
+    (b_deco, b), (a_deco, a) = parsed  # type: ignore[misc]
+    if b_deco != a_deco or type(b) is not type(a) or _src(b.returns) != _src(a.returns):
+        return False
+    ba, aa = b.args, a.args
+    b_pos, a_pos = ba.posonlyargs + ba.args, aa.posonlyargs + aa.args
+
+    def defaults(params: list[ast.arg], values: list[ast.expr]) -> dict[str, str]:
+        return {p.arg: ast.unparse(v) for p, v in zip(params[len(params) - len(values):], values)}
+
+    b_def, a_def = defaults(b_pos, ba.defaults), defaults(a_pos, aa.defaults)
+    if len(a_pos) < len(b_pos) or len(aa.posonlyargs) > len(ba.posonlyargs):
+        return False
+    for old, new in zip(b_pos, a_pos):
+        if old.arg != new.arg or _src(old.annotation) != _src(new.annotation) or b_def.get(old.arg) != a_def.get(old.arg):
+            return False
+    extra_pos = a_pos[len(b_pos):]
+    if ba.vararg and extra_pos:  # new positionals would swallow arguments that went to *args
+        return False
+    if any(p.arg not in a_def for p in extra_pos):
+        return False
+
+    b_kw = {p.arg: (p, d) for p, d in zip(ba.kwonlyargs, ba.kw_defaults)}
+    a_kw = {p.arg: (p, d) for p, d in zip(aa.kwonlyargs, aa.kw_defaults)}
+    for name, (p, d) in b_kw.items():
+        if name not in a_kw:
+            return False
+        q, e = a_kw[name]
+        if _src(p.annotation) != _src(q.annotation) or _src(d) != _src(e):
+            return False
+    if any(d is None for name, (_, d) in a_kw.items() if name not in b_kw):  # new required keyword
+        return False
+    if (ba.vararg and not aa.vararg) or (ba.kwarg and not aa.kwarg):
+        return False
+    return True
+
+
 def diff_surfaces(before: dict[str, str], after: dict[str, str]) -> ApiDiff:
     return ApiDiff(
         removed={k: v for k, v in before.items() if k not in after},
@@ -215,8 +277,13 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
         evidence = {"symbol": symbol, "before": old, "after": new, "exported_from": exported_from, "baseline": ref}
         return ViolationReport.for_clause(clause, evidence)
 
-    reports = [report(s, b, a) for s, (b, a) in diff.changed.items()]
+    additive_ok = params.get("allow_additive", True)
+    reports = [
+        report(s, b, a)
+        for s, (b, a) in diff.changed.items()
+        if not (additive_ok and signatures_compatible(b, a))
+    ]
     reports += [report(s, b, None) for s, b in diff.removed.items()]
-    if not params.get("allow_additive", True):
+    if not additive_ok:
         reports += [report(s, None, a) for s, a in diff.added.items()]
     return reports

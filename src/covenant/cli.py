@@ -83,6 +83,19 @@ def _emit(decision: Decision) -> int:
     return decision.exit_code
 
 
+def _only_setup_staged(repo: Path, covenant_path: Path) -> bool:
+    import subprocess
+
+    result = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--name-only"], capture_output=True, text=True)
+    staged = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    try:
+        rel_covenant = covenant_path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        rel_covenant = None
+    setup = {rel_covenant, ".claude/settings.json", ".claude/settings.local.json"}
+    return bool(staged) and staged <= setup
+
+
 def _install_git_hooks(repo: Path, covenant_path: Path, state_dir: str | None) -> int:
     hooks = repo / ".git" / "hooks"
     if not hooks.is_dir():
@@ -282,6 +295,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "check":
             return _emit(runtime.check())
         if args.command == "hook":  # git shows hook output to the agent: stay quiet when clean
+            if args.name == "pre-commit" and _only_setup_staged(repo, covenant_path):
+                # Committing Covenant's own setup (rules, hook config) is the human's job and the
+                # agent can't write these files, so it needs no test run. Tampering still blocks.
+                tampering = runtime.integrity_reports()
+                if not tampering:
+                    print("covenant: commit only contains Covenant setup files; allowed", file=sys.stderr)
+                    return 0
+                return _emit(Decision("commit", False, tampering))
             decision = runtime.record(Commit() if args.name == "pre-commit" else Push())
             return _emit(decision) if decision.reports else 0
         if args.command == "record":

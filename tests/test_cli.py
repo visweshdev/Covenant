@@ -51,3 +51,16 @@ def test_git_hook_blocks_untested_commit(mylib_repo, tmp_path):
     assert cli(mylib_repo, state, "test").returncode == 0
     ok = git(mylib_repo, "commit", "-qm", "tested")
     assert ok.returncode == 0, ok.stderr
+
+
+def test_committing_only_setup_files_needs_no_tests(mylib_repo, tmp_path):
+    state = tmp_path / "state"
+    assert cli(mylib_repo, state, "install-hooks").returncode == 0
+    assert cli(mylib_repo, state, "install-claude").returncode == 0
+    assert cli(mylib_repo, state, "start").returncode == 0
+    git(mylib_repo, "add", ".claude/settings.json")
+    setup = git(mylib_repo, "commit", "-qm", "add covenant hooks")
+    assert setup.returncode == 0, setup.stderr
+    (mylib_repo / "notes.txt").write_text("x\n")
+    git(mylib_repo, "add", "notes.txt")
+    assert git(mylib_repo, "commit", "-qm", "work").returncode != 0  # ordinary commits still need tests

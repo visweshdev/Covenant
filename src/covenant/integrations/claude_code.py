@@ -29,7 +29,10 @@ from ..paths import control_paths, is_under
 from ..runtime import Decision, Runtime
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit"
+# Claude Code on Windows also has a PowerShell tool; it must get the same checks as Bash.
+SHELL_TOOLS = {"Bash", "PowerShell"}
+SHELL_MATCHER = "|".join(sorted(SHELL_TOOLS))
+TOOL_MATCHER = f"{SHELL_MATCHER}|Write|Edit|MultiEdit|NotebookEdit"
 MAX_REASON = 9000
 
 # `git [global options] commit|push`, anywhere in a compound command.
@@ -124,7 +127,7 @@ class ClaudeCodeHook:
                 if reports:
                     return self._deny(self._render("Covenant denied this edit", reports))
             return {}
-        if tool == "Bash":
+        if tool in SHELL_TOOLS:
             command = tool_input.get("command", "")
             if _BYPASS.search(command):
                 return self._deny("Covenant: commands that skip or redirect git hooks or disable hooks are not allowed.")
@@ -161,7 +164,7 @@ class ClaudeCodeHook:
                 return {}
             path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
             decision = self.rt.record(Edit(path=normalize_path(path, self.rt.repo_root)))
-        elif tool == "Bash":
+        elif tool in SHELL_TOOLS:
             command = tool_input.get("command", "")
             exit_code = 0 if succeeded else 1
             test_cmd = is_test_run(command, self.rt.test_commands)
@@ -304,7 +307,7 @@ def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_f
         ("SessionStart", None),
         ("PreToolUse", TOOL_MATCHER),
         ("PostToolUse", TOOL_MATCHER),
-        ("PostToolUseFailure", "Bash"),
+        ("PostToolUseFailure", SHELL_MATCHER),
         ("Stop", None),
     ]
     for event, matcher in plan:
