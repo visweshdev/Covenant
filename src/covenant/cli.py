@@ -29,6 +29,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--state-dir", help="where the trace and snapshots live (default: ~/.covenant/workspaces/...)")
     sub = p.add_subparsers(dest="command", required=True)
 
+    ci = sub.add_parser("ci", help="check a pull request (base..HEAD) against the Covenant")
+    ci.add_argument("--base", help="base ref (default: merge-base with the PR target or main)")
+    ci.add_argument("--no-tests", action="store_true", help="don't run the test commands")
+    ci.add_argument("--format", choices=["text", "github", "json"], default="text")
     comp = sub.add_parser("compile", help="turn a plain-English instruction into covenant.yaml")
     comp.add_argument("instruction", help="the instruction you would give the agent")
     comp.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
@@ -112,6 +116,29 @@ def _install_claude(repo: Path, state_dir: str | None, local: bool) -> int:
     return 0
 
 
+def _ci(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
+    from . import ci
+
+    try:
+        result = ci.run_ci(repo, covenant_path, args.base, run_test_commands=not args.no_tests)
+    except (ValueError, OSError, ValidationError) as exc:
+        print(f"covenant: {exc}", file=sys.stderr)
+        return 3
+    if args.format == "json":
+        print(json.dumps({"base": result.base, "covenant": result.covenant_source, "notes": result.notes,
+                          "reports": [r.model_dump(mode="json") for r in result.reports]}, indent=2))
+    elif args.format == "github":
+        for line in ci.github_annotations(result):
+            print(line)
+        summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_file:
+            with open(summary_file, "a", encoding="utf-8") as f:
+                f.write(ci.markdown_summary(result))
+    else:
+        print(ci.markdown_summary(result))
+    return 1 if result.failed else 0
+
+
 def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
     from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor
     from .compiler.pipeline import compile_instruction, render_summary
@@ -170,6 +197,9 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to a legacy code page
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
     repo = Path(args.repo).resolve()
     covenant_path = Path(args.covenant).resolve() if args.covenant else repo / "covenant.yaml"
@@ -182,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "compile":
         return _compile(args, repo, covenant_path)
+    if args.command == "ci":
+        return _ci(args, repo, covenant_path)
 
     try:
         covenant = Covenant.load(covenant_path)

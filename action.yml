@@ -1,0 +1,38 @@
+name: Covenant
+description: Check a pull request against the repository's Covenant (API, data and test rules for coding agents).
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  covenant:
+    description: Path to the Covenant file
+    default: covenant.yaml
+  base:
+    description: Base ref to compare against (default: the PR's target branch)
+    default: ""
+  run-tests:
+    description: Run the Covenant's test commands on the PR
+    default: "true"
+  python-version:
+    description: Python used to run Covenant
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install Covenant
+      shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}"
+    - name: Check the Covenant
+      shell: bash
+      env:
+        COVENANT_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+      run: |
+        args=(--covenant "${{ inputs.covenant }}" ci --format github)
+        if [ -n "$COVENANT_BASE" ]; then args+=(--base "$COVENANT_BASE"); fi
+        if [ "${{ inputs.run-tests }}" != "true" ]; then args+=(--no-tests); fi
+        python -m covenant "${args[@]}"
