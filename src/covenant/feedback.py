@@ -59,6 +59,11 @@ def default_hints(clause: Clause, evidence: dict[str, Any]) -> list[str]:
             return [f"Run `{test_cmd}` after your last edit, make sure it passes, then retry"]
         return ["Satisfy the ordering rule in the evidence, then retry"]
     if checker == "effect_monitor":
+        if evidence.get("rolled_back") is True:
+            return [
+                f"{evidence.get('target')} is protected, so Covenant restored it from its snapshot. "
+                "Leave it in place; if the change is really needed, ask the human",
+            ]
         return [
             f"Do not {evidence.get('op', 'modify')} {evidence.get('target', 'this target')}; it is protected",
             "If the change is needed, stop and ask the human",

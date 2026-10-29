@@ -265,13 +265,30 @@ def importable_outside_source() -> bool:
 
 
 def _is_ours(group: dict[str, Any]) -> bool:
-    return any("claude-hook" in str(h.get("command", "")) and "covenant" in str(h.get("command", "")) for h in group.get("hooks", []))
+    def ours(h: dict[str, Any]) -> bool:
+        text = " ".join([str(h.get("command", ""))] + [str(a) for a in h.get("args", [])])
+        return "claude-hook" in text and "covenant" in text
+
+    return any(ours(h) for h in group.get("hooks", []))
 
 
-def hook_command(repo: Path, state_dir: Path | None) -> str:
+def hook_args(repo: Path, state_dir: Path | None) -> list[str]:
+    args = ["-m", "covenant", "--repo", repo.as_posix()]
+    if state_dir:
+        args += ["--state-dir", state_dir.as_posix()]
+    return args + ["claude-hook"]
+
+
+def hook_handler(repo: Path, state_dir: Path | None) -> dict[str, Any]:
+    """The hook entry. Claude Code runs shell-form hooks in Git Bash or PowerShell, and a
+    command that starts with a quoted path is a syntax error in PowerShell, so the
+    interpreter path goes first unquoted. Paths with spaces need exec form instead."""
     python = Path(sys.executable).as_posix()
-    state = f' --state-dir "{state_dir.as_posix()}"' if state_dir else ""
-    return f'"{python}" -m covenant --repo "{repo.as_posix()}"{state} claude-hook'
+    args = hook_args(repo, state_dir)
+    if " " in python:
+        return {"type": "command", "command": python, "args": args}
+    quoted = " ".join(a if a.startswith("-") or a == "claude-hook" else f'"{a}"' for a in args)
+    return {"type": "command", "command": f"{python} {quoted}"}
 
 
 def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_failure_block: bool | None = None) -> Path:
@@ -292,7 +309,7 @@ def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_f
     ]
     for event, matcher in plan:
         groups = [g for g in hooks.get(event, []) if not _is_ours(g)]
-        handler: dict[str, Any] = {"type": "command", "command": hook_command(repo, state_dir), "timeout": 300}
+        handler: dict[str, Any] = {**hook_handler(repo, state_dir), "timeout": 300}
         if on_failure_block and event == "PreToolUse":
             handler["onFailure"] = "block"
         group: dict[str, Any] = {"hooks": [handler]}

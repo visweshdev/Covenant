@@ -91,9 +91,9 @@ def test_api_break_blocks_commit_and_stop(hook, mylib_repo):
 def test_stop_hands_over_to_human_after_repeats(hook, mylib_repo):
     core = mylib_repo / "mylib" / "core.py"
     core.write_text(core.read_text().replace("def parse(text: str, strict: bool = False)", "def parse(text: str, *, mode: str = 'x')"))
-    outs = [hook.handle({"hook_event_name": "Stop"}) for _ in range(3)]
+    outs = [hook.handle({"hook_event_name": "Stop"}) for _ in range(5)]
     assert outs[0]["decision"] == "block"
-    assert "decision" not in outs[2] and "need a human" in outs[2]["systemMessage"]
+    assert "decision" not in outs[4] and "need a human" in outs[4]["systemMessage"]
 
 
 def test_protected_and_control_files(hook, mylib_repo):
@@ -214,3 +214,20 @@ def test_parallel_hooks_do_not_lose_events(mylib_repo, tmp_path):
     ]
     assert all(p.wait() == 0 for p in procs)
     assert len(Runtime.open(mylib_repo, state_dir=state).trace) == 8
+
+
+def test_hook_command_runs_in_powershell_and_bash(tmp_path):
+    """Claude Code may run shell-form hooks in PowerShell, where a leading quoted path is a syntax error."""
+    from covenant.integrations.claude_code import hook_handler
+
+    handler = hook_handler(tmp_path, None)
+    if "args" in handler:  # interpreter path has spaces: exec form, no shell involved
+        return
+    assert not handler["command"].startswith('"')
+    shells = [["bash", "-c"]]
+    if sys.platform == "win32":
+        shells.append(["powershell.exe", "-NoProfile", "-Command"])
+    for shell in shells:
+        r = subprocess.run(shell + [handler["command"]], input="{}", capture_output=True, text=True,
+                           env={**os.environ, "PYTHONPATH": str(SRC)})
+        assert r.returncode == 0, (shell[0], r.stderr[-500:])

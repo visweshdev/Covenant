@@ -281,8 +281,9 @@ def main(argv: list[str] | None = None) -> int:
             return code
         if args.command == "check":
             return _emit(runtime.check())
-        if args.command == "hook":
-            return _emit(runtime.record(Commit() if args.name == "pre-commit" else Push()))
+        if args.command == "hook":  # git shows hook output to the agent: stay quiet when clean
+            decision = runtime.record(Commit() if args.name == "pre-commit" else Push())
+            return _emit(decision) if decision.reports else 0
         if args.command == "record":
             event = {
                 "edit": lambda: Edit(path=args.path),

@@ -118,8 +118,8 @@ def test_baseline_is_pinned_at_start(mylib_repo, tmp_path):
 def test_repeated_blocks_escalate(mylib_repo, tmp_path):
     rt = runtime(mylib_repo, tmp_path)
     rt.record(Edit(path="mylib/core.py"))
-    codes = [rt.record(Commit()).exit_code for _ in range(3)]
-    assert codes == [1, 1, 2]
+    codes = [rt.record(Commit()).exit_code for _ in range(5)]
+    assert codes == [1, 1, 1, 1, 2]
 
 
 def test_verifier_that_cannot_run_fails_closed(mylib_repo, tmp_path):

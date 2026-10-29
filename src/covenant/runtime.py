@@ -28,7 +28,7 @@ from .events import EVENT_ADAPTER, GATED_EVENTS, Effect, Event, TestRun
 from .feedback import ViolationReport
 from .ir import Clause, ClauseKind, Covenant, OnViolation
 from .locking import file_lock
-from .monitors.effects import EffectMonitor
+from .monitors.effects import EffectMonitor, normalize_path
 from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import TraceMonitor
 from .paths import claude_settings_files, default_state_dir
@@ -89,7 +89,7 @@ class Runtime:
         covenant: Covenant,
         repo_root: str | Path,
         state_dir: str | Path | None = None,
-        escalate_after: int = 3,
+        escalate_after: int = 5,
         covenant_path: str | Path | None = None,
     ):
         self.repo_root = Path(repo_root).resolve()
@@ -273,8 +273,9 @@ class Runtime:
 
     def would_violate(self, effect: Effect) -> list[ViolationReport]:
         """Reports for an effect that has not happened yet, so it can be denied up front."""
+        target = normalize_path(effect.target, self.repo_root) if effect.channel == "fs" else effect.target
         return [
-            ViolationReport.for_clause(m.clause, {"op": effect.op, "target": effect.target, "channel": effect.channel})
+            ViolationReport.for_clause(m.clause, {"op": effect.op, "target": target, "channel": effect.channel})
             for m in self.effect_monitors
             if m.violates(effect)
         ]
