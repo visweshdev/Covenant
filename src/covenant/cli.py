@@ -29,6 +29,14 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--state-dir", help="where the trace and snapshots live (default: ~/.covenant/workspaces/...)")
     sub = p.add_subparsers(dest="command", required=True)
 
+    comp = sub.add_parser("compile", help="turn a plain-English instruction into covenant.yaml")
+    comp.add_argument("instruction", help="the instruction you would give the agent")
+    comp.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
+    comp.add_argument("--model", default=None, help="Claude model for extraction (default: claude-opus-5-5)")
+    comp.add_argument("--answer", action="append", default=[], metavar="Q1=2", help="answer a question (1-based option)")
+    comp.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
+    comp.add_argument("--yes", action="store_true", help="write the file without asking for approval")
+    comp.add_argument("--dry-run", action="store_true", help="print the result without writing it")
     init = sub.add_parser("init", help="set up a repo: validate, install git and Claude Code hooks, start")
     init.add_argument("--no-claude", action="store_true", help="skip the Claude Code hooks")
     init.add_argument("--no-git", action="store_true", help="skip the git hooks")
@@ -104,6 +112,63 @@ def _install_claude(repo: Path, state_dir: str | None, local: bool) -> int:
     return 0
 
 
+def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
+    from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor
+    from .compiler.pipeline import compile_instruction, render_summary
+
+    answers: dict[str, int] = {}
+    for item in args.answer:
+        qid, _, choice = item.partition("=")
+        if not choice.isdigit():
+            print(f"covenant: --answer must look like Q1=2, got {item!r}", file=sys.stderr)
+            return 3
+        answers[qid.strip().upper()] = int(choice) - 1
+
+    interactive = sys.stdin.isatty() and not args.unattended
+
+    def ask(question) -> int:
+        print(f"\n{question.id}. {question.text}", file=sys.stderr)
+        for n, option in enumerate(question.options, 1):
+            mark = " (default)" if n - 1 == question.default else ""
+            print(f"  {n}. {option.label}{mark}", file=sys.stderr)
+        while True:
+            reply = input(f"Choose 1-{len(question.options)} [{question.default + 1}]: ").strip()
+            if not reply:
+                return question.default
+            if reply.isdigit() and 1 <= int(reply) <= len(question.options):
+                return int(reply) - 1
+
+    extractor = HeuristicExtractor() if args.offline else LLMExtractor(**({"model": args.model} if args.model else {}))
+    try:
+        result = compile_instruction(args.instruction, repo, extractor, ask=ask if interactive else None, answers=answers)
+    except CompileError as exc:
+        print(f"covenant: {exc}", file=sys.stderr)
+        return 3
+    print(render_summary(result), file=sys.stderr)
+    if result.defaulted:
+        print(f"\n{len(result.defaulted)} lower-impact question(s) took the conservative default (see 'assumes').", file=sys.stderr)
+    if args.dry_run:
+        print(Path(covenant_path).name + ":", file=sys.stderr)
+        import yaml
+
+        print(yaml.safe_dump({"covenant": result.covenant.model_dump(mode="json", exclude_defaults=True)}, sort_keys=False))
+        return 3 if result.errors else 0
+    if result.errors:
+        print("\ncovenant: fix the errors above before using this Covenant.", file=sys.stderr)
+        return 3
+    if covenant_path.exists() and not args.yes:
+        print(f"\nnote: {covenant_path} exists and will be replaced.", file=sys.stderr)
+    if not args.yes:
+        if not interactive:
+            print("\ncovenant: pass --yes to write the file without a prompt.", file=sys.stderr)
+            return 3
+        if input(f"\nWrite {covenant_path}? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+            return 1
+    result.covenant.dump(covenant_path)
+    print(f"wrote {covenant_path}. Next: `covenant init` to install hooks and start enforcing.", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     repo = Path(args.repo).resolve()
@@ -114,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
         if output:
             print(json.dumps(output))
         return code
+
+    if args.command == "compile":
+        return _compile(args, repo, covenant_path)
 
     try:
         covenant = Covenant.load(covenant_path)

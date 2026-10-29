@@ -7,6 +7,8 @@ and annotated fields. The plan is to swap this for griffe; the diff format stays
 
 Clause params:
     package:        import name of the package, e.g. "mylib"
+    root:           folder that contains the package, e.g. "src" (default: repo root)
+    extra_modules:  modules that count as public although not exported, e.g. ["mylib._compat"]
     baseline:       git ref to compare against (the runtime pins it to a sha at start)
     allow_additive: new exports are fine (default true)
 """
@@ -173,13 +175,40 @@ def diff_surfaces(before: dict[str, str], after: dict[str, str]) -> ApiDiff:
     )
 
 
+def _prefixed(read: Reader, root: str) -> Reader:
+    root = root.strip("/")
+    return (lambda rel: read(f"{root}/{rel}")) if root else read
+
+
+def module_surface(read: Reader, module: str) -> dict[str, str]:
+    """Public top-level names of one module, for modules treated as public without being exported."""
+    loaded = _read_module(read, module)
+    if loaded is None:
+        raise ApiSurfaceError(f"module {module!r} not found")
+    tree, _ = loaded
+    surface: dict[str, str] = {}
+    root = module.split(".")[0]
+    for name in _exported_names(tree):
+        surface.update(_resolve(read, root, module, name, f"{module}.{name}", 0))
+    return surface
+
+
+def full_surface(read: Reader, package: str, extra_modules: list[str]) -> dict[str, str]:
+    surface = extract_surface(read, package)
+    for module in extra_modules:
+        surface.update(module_surface(read, module))
+    return surface
+
+
 def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list[ViolationReport]:
     params = clause.params
     package = params["package"]
+    source_root = params.get("root", "")
+    extra = list(params.get("extra_modules", []))
     ref = baseline or params.get("baseline", "HEAD")
-    exported_from = f"{package.replace('.', '/')}/__init__.py"
-    before = extract_surface(git_reader(repo_root, ref), package)
-    after = extract_surface(working_tree_reader(repo_root), package)
+    exported_from = "/".join(p for p in (source_root.strip("/"), f"{package.replace('.', '/')}/__init__.py") if p)
+    before = full_surface(_prefixed(git_reader(repo_root, ref), source_root), package, extra)
+    after = full_surface(_prefixed(working_tree_reader(repo_root), source_root), package, extra)
     diff = diff_surfaces(before, after)
 
     def report(symbol: str, old: str | None, new: str | None) -> ViolationReport:

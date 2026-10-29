@@ -5,6 +5,7 @@ Contradiction checks between clauses belong to the compiler and come later.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,8 +51,11 @@ def validate(covenant: Covenant, repo_root: Path) -> list[Issue]:
                 parse_formula(clause.params["formula"])
             except FormulaError as exc:
                 add("error", f"bad formula: {exc}")
-            if "test_cmd" not in clause.params:
+            if "test_" in clause.params["formula"] and "test_cmd" not in clause.params:
                 add("warning", "no test_cmd; `covenant test` cannot run tests for this clause")
+            test_cmd = clause.params.get("test_cmd")
+            if test_cmd and shutil.which(test_cmd.split()[0]) is None:
+                add("warning", f"test command {test_cmd.split()[0]!r} is not on PATH")
 
         elif spec.name == "effect_monitor":
             if not clause.params.get("paths") and not clause.params.get("db_tables"):
@@ -62,6 +66,7 @@ def validate(covenant: Covenant, repo_root: Path) -> list[Issue]:
 
         elif spec.name == "api_surface_diff" and "package" in clause.params:
             pkg = clause.params["package"].replace(".", "/")
-            if not (repo_root / pkg / "__init__.py").is_file() and not (repo_root / f"{pkg}.py").is_file():
+            base = repo_root / clause.params.get("root", "")
+            if not (base / pkg / "__init__.py").is_file() and not (base / f"{pkg}.py").is_file():
                 add("error", f"package {clause.params['package']!r} not found under {repo_root}")
     return issues

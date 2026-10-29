@@ -1,0 +1,195 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from covenant.compiler.extract import CompileError, HeuristicExtractor, LLMExtractor
+from covenant.compiler.ground import ground
+from covenant.compiler.pipeline import check_spans, compile_instruction
+from covenant.compiler.schema import CandidateClause, Extraction, Intent
+from covenant.ir import ClauseStatus, Covenant
+
+SRC = Path(__file__).resolve().parent.parent / "src"
+EXAMPLE = "Update dependencies, but don't change public APIs, don't delete user data, and run tests before committing."
+
+
+def intents(extraction):
+    return [c.intent for c in extraction.clauses]
+
+
+def test_offline_extraction_of_the_running_example(mylib_repo):
+    ex = HeuristicExtractor()(EXAMPLE, ground(mylib_repo))
+    assert ex.goal_span == "Update dependencies"
+    assert intents(ex) == [Intent.PUBLIC_API_UNCHANGED, Intent.NO_DATA_LOSS, Intent.TESTS_BEFORE_COMMIT]
+    assert check_spans(EXAMPLE, ex) == []
+
+
+@pytest.mark.parametrize(
+    "instruction, expected",
+    [
+        ("Refactor the parser. Never push to the remote.", [Intent.NO_PUSH]),
+        ("Fix the bug; don't touch config/settings.yaml", [Intent.PROTECT_PATHS]),
+        ("Add a feature and keep the code readable", [Intent.OTHER]),
+        ("Migrate the schema without destructive migrations", [Intent.NO_DESTRUCTIVE_MIGRATIONS]),
+        ("Ship it, tests must pass before you push", [Intent.TESTS_BEFORE_PUSH]),
+    ],
+)
+def test_offline_intents(instruction, expected, tmp_path):
+    assert intents(HeuristicExtractor()(instruction, ground(tmp_path))) == expected
+
+
+def test_span_checks():
+    ex = Extraction(
+        goal_action="x", goal_span="Update dependencies",
+        clauses=[CandidateClause(source_span="don't change APIs", intent=Intent.PUBLIC_API_UNCHANGED, paths=[], reading="")],
+        no_constraint_spans=[],
+    )
+    issues = check_spans("Update dependencies, don't change public APIs, and be quick.", ex)
+    assert any(i.level == "error" and "not in the instruction" in i.message for i in issues)
+    assert any(i.level == "warning" and "quick" in i.message for i in issues)
+
+
+def test_compile_running_example(mylib_repo):
+    result = compile_instruction(EXAMPLE, mylib_repo, HeuristicExtractor())
+    cov = result.covenant
+    assert [c.checker for c in cov.enforced()] == ["api_surface_diff", "effect_monitor", "trace_monitor"]
+    assert cov.clause("C2").params["paths"] == ["data/**"]
+    assert cov.clause("C3").params["test_cmd"] == "python -m pytest -q"
+    assert result.errors == []
+
+
+def _with_ambiguity(repo: Path) -> Path:
+    (repo / "data" / "cache").mkdir()
+    for n in range(3):
+        (repo / "data" / "cache" / f"m{n}.bin").write_text("x")
+    (repo / "mylib" / "_compat.py").write_text("def load():\n    pass\n")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "guide.md").write_text("Old files: use mylib._compat.load().")
+    return repo
+
+
+def test_questions_default_to_the_safe_reading(mylib_repo):
+    result = compile_instruction(EXAMPLE, _with_ambiguity(mylib_repo), HeuristicExtractor())
+    cov = result.covenant
+    assert len(result.defaulted) == 2 and result.asked == []
+    assert "exclude" not in cov.clause("C2").params
+    assert cov.clause("C1").params["extra_modules"] == ["mylib._compat"]
+    assert any("conservative default" in a for a in cov.clause("C2").assumptions)
+
+
+def test_answers_change_the_covenant(mylib_repo):
+    repo = _with_ambiguity(mylib_repo)
+    questions_seen = []
+
+    def ask(q):
+        questions_seen.append(q.text)
+        return 1  # second option: "may clear it" / "it's internal"
+
+    cov = compile_instruction(EXAMPLE, repo, HeuristicExtractor(), ask=ask).covenant
+    assert len(questions_seen) == 2
+    assert any("data/cache/" in t for t in questions_seen)
+    assert cov.clause("C2").params["exclude"] == ["data/cache/**"]
+    assert "extra_modules" not in cov.clause("C1").params
+
+
+def test_at_most_three_questions_are_asked(mylib_repo):
+    repo = _with_ambiguity(mylib_repo)
+    for name in ("tmp", "logs", "temp"):
+        (repo / "data" / name).mkdir()
+        (repo / "data" / name / "f").write_text("x")
+    asked = []
+    result = compile_instruction(EXAMPLE, repo, HeuristicExtractor(), ask=lambda q: asked.append(q) or 0)
+    assert len(asked) == 3 and len(result.defaulted) >= 2
+
+
+def test_unenforceable_and_pending_are_reported_not_dropped(tmp_path):
+    result = compile_instruction("Add caching, keep the code readable, and run tests before committing", tmp_path, HeuristicExtractor())
+    statuses = {c.source_span: c.status for c in result.covenant.clauses}
+    assert statuses["keep the code readable"] is ClauseStatus.UNENFORCEABLE
+    assert statuses["run tests before committing"] is ClauseStatus.PENDING_CLARIFICATION
+
+
+def test_contradiction_goal_inside_protected_path(mylib_repo):
+    result = compile_instruction("Clean up data/tmp, but don't delete user data", mylib_repo, HeuristicExtractor())
+    assert any(i.level == "error" and "impossible" in i.message for i in result.issues)
+
+
+def test_grounding_reads_ci_and_models(tmp_path):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "ci.yml").write_text("jobs:\n  t:\n    steps:\n      - run: pytest -x tests\n")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "__init__.py").write_text("")
+    (tmp_path / "app" / "models.py").write_text('class U(Base):\n    __tablename__ = "users"\n')
+    (tmp_path / "app.db").write_text("")
+    facts = ground(tmp_path)
+    assert facts.test_commands[0] == ("pytest -x tests", ".github/workflows/ci.yml")
+    assert facts.db_tables == ["users"]
+    assert "app.db" in facts.data_paths
+    assert [p.name for p in facts.python_packages] == ["app"]
+
+
+# ----- the Claude extractor, with a stand-in client -------------------------------------
+
+
+class FakeMessages:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.response
+
+
+def fake_client(text, stop_reason="end_turn"):
+    response = SimpleNamespace(stop_reason=stop_reason, content=[SimpleNamespace(type="text", text=text)])
+    messages = FakeMessages(response)
+    return SimpleNamespace(beta=SimpleNamespace(messages=messages)), messages
+
+
+def test_llm_extractor_request_and_parse(mylib_repo):
+    payload = {
+        "goal_action": "update_dependencies", "goal_span": "Update dependencies",
+        "clauses": [{"source_span": "don't change public APIs", "intent": "public_api_unchanged", "paths": [], "reading": "API stays"}],
+        "no_constraint_spans": [],
+    }
+    client, messages = fake_client(json.dumps(payload))
+    ex = LLMExtractor(client=client)("Update dependencies, but don't change public APIs.", ground(mylib_repo))
+    assert intents(ex) == [Intent.PUBLIC_API_UNCHANGED]
+    call = messages.calls[0]
+    assert call["model"] == "claude-opus-5-5"
+    assert call["output_config"]["format"]["type"] == "json_schema"
+    assert call["output_config"]["effort"] == "high"
+    assert call["fallbacks"] == "default"
+    assert "mylib" in call["messages"][0]["content"]
+
+
+def test_llm_extractor_refusal_and_bad_output(mylib_repo):
+    client, _ = fake_client("", stop_reason="refusal")
+    with pytest.raises(CompileError, match="declined"):
+        LLMExtractor(client=client)("x", ground(mylib_repo))
+    client, _ = fake_client('{"goal_action": 1}')
+    with pytest.raises(CompileError, match="schema"):
+        LLMExtractor(client=client)("x", ground(mylib_repo))
+
+
+def test_extraction_schema_is_strict():
+    schema = Extraction.model_json_schema()
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"goal_action", "goal_span", "clauses", "no_constraint_spans"}
+
+
+def test_cli_compile_then_init(mylib_repo, tmp_path):
+    (mylib_repo / "covenant.yaml").unlink()
+    env = {**os.environ, "PYTHONPATH": str(SRC)}
+    base = [sys.executable, "-m", "covenant", "--repo", str(mylib_repo), "--state-dir", str(tmp_path / "s")]
+    r = subprocess.run(base + ["compile", EXAMPLE, "--offline", "--unattended", "--yes"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    cov = Covenant.load(mylib_repo / "covenant.yaml")
+    assert len(cov.enforced()) == 3
+    r = subprocess.run(base + ["init", "--no-claude"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
