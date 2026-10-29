@@ -17,7 +17,7 @@ def test_example_has_no_errors():
     assert errors(issues) == []
 
 
-def test_unknown_and_planned_checkers():
+def test_unknown_checker():
     issues = validate(
         cov(
             {"id": "A", "kind": "SemanticInvariant", "source_span": "x", "checker": "magic"},
@@ -26,8 +26,7 @@ def test_unknown_and_planned_checkers():
         EXAMPLE,
     )
     msgs = errors(issues)
-    assert "unknown checker 'magic'" in msgs[0]
-    assert "planned" in msgs[1]
+    assert len(msgs) == 1 and "unknown checker 'magic'" in msgs[0]
 
 
 def test_kind_mismatch_and_missing_params():

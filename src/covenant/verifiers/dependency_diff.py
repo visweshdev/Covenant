@@ -1,0 +1,142 @@
+"""dependency_diff: only allowed dependencies change, within allowed version ranges.
+
+Compares dependency manifests and lockfiles between the baseline and the working tree:
+pyproject.toml ([project] and Poetry), requirements*.txt, package.json,
+package-lock.json, poetry.lock and uv.lock.
+
+Clause params:
+    allow:       package names that may change (empty = any package)
+    deny_major:  a locked version may not move to a new major version (default true)
+    allow_new:   new dependencies may be added (default true)
+    allow_removed: dependencies may be removed (default false)
+    baseline:    git ref (the runtime pins it to a sha at start)
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import tomllib
+from collections.abc import Callable
+from pathlib import Path
+
+from ..feedback import ViolationReport
+from ..ir import Clause
+
+Reader = Callable[[str], "str | None"]
+_REQ = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*?)\s*(?:;.*)?$")
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _req_lines(lines: list[str]) -> dict[str, str]:
+    out = {}
+    for line in lines:
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith(("-", "git+", "http")):
+            continue
+        m = _REQ.match(line)
+        if m:
+            out[_norm(m.group(1))] = m.group(2).strip()
+    return out
+
+
+def declared(read: Reader) -> dict[str, str]:
+    """Declared ranges, keyed by 'ecosystem:name'."""
+    deps: dict[str, str] = {}
+    text = read("pyproject.toml")
+    if text:
+        data = tomllib.loads(text)
+        project = data.get("project", {})
+        groups = [project.get("dependencies", [])] + list(project.get("optional-dependencies", {}).values())
+        for group in groups:
+            deps.update({f"py:{k}": v for k, v in _req_lines(list(group)).items()})
+        poetry = data.get("tool", {}).get("poetry", {})
+        for section in ("dependencies", "dev-dependencies"):
+            for name, spec in poetry.get(section, {}).items():
+                if name.lower() != "python":
+                    deps[f"py:{_norm(name)}"] = spec if isinstance(spec, str) else json.dumps(spec, sort_keys=True)
+    for name in ("requirements.txt", "requirements-dev.txt", "requirements/base.txt", "requirements/dev.txt"):
+        text = read(name)
+        if text:
+            deps.update({f"py:{k}": v for k, v in _req_lines(text.splitlines()).items()})
+    text = read("package.json")
+    if text:
+        data = json.loads(text)
+        for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+            deps.update({f"js:{k}": v for k, v in data.get(section, {}).items()})
+    return deps
+
+
+def locked(read: Reader) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    text = read("package-lock.json")
+    if text:
+        data = json.loads(text)
+        for path, info in data.get("packages", {}).items():
+            if path.startswith("node_modules/") and "version" in info:
+                versions[f"js:{path.rsplit('node_modules/', 1)[1]}"] = info["version"]
+    for name in ("poetry.lock", "uv.lock"):
+        text = read(name)
+        if text:
+            for pkg in tomllib.loads(text).get("package", []):
+                if "name" in pkg and "version" in pkg:
+                    versions[f"py:{_norm(pkg['name'])}"] = str(pkg["version"])
+    return versions
+
+
+def _major(version: str) -> int | None:
+    m = re.match(r"\D*(\d+)", version)
+    return int(m.group(1)) if m else None
+
+
+def _reader(repo: Path, ref: str | None) -> Reader:
+    if ref is None:
+        return lambda rel: (repo / rel).read_text(encoding="utf-8") if (repo / rel).is_file() else None
+
+    def read(rel: str) -> str | None:
+        r = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{rel}"], capture_output=True, text=True, encoding="utf-8")
+        return r.stdout if r.returncode == 0 else None
+
+    return read
+
+
+def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list[ViolationReport]:
+    params = clause.params
+    ref = baseline or params.get("baseline", "HEAD")
+    allow = {_norm(n) for n in params.get("allow", [])}
+    deny_major = params.get("deny_major", True)
+    allow_new = params.get("allow_new", True)
+    allow_removed = params.get("allow_removed", False)
+
+    before_read, after_read = _reader(repo_root, ref), _reader(repo_root, None)
+    reports: list[ViolationReport] = []
+
+    def report(key: str, change: str, old: str | None, new: str | None, hint: str) -> None:
+        eco, _, name = key.partition(":")
+        reports.append(ViolationReport.for_clause(
+            clause, {"symbol": name, "ecosystem": eco, "change": change, "before": old, "after": new}, hints=[hint]))
+
+    def allowed(key: str) -> bool:
+        return not allow or _norm(key.partition(":")[2]) in allow
+
+    for source in (declared, locked):
+        before, after = source(before_read), source(after_read)
+        for key in sorted(set(before) | set(after)):
+            old, new = before.get(key), after.get(key)
+            if old == new:
+                continue
+            if old is None:
+                if not allow_new or not allowed(key):
+                    report(key, "added", None, new, "Remove the new dependency, or ask the human to allow it")
+            elif new is None:
+                if not allow_removed or not allowed(key):
+                    report(key, "removed", old, None, "Keep the dependency, or ask the human to allow removing it")
+            elif not allowed(key):
+                report(key, "changed", old, new, f"Only {', '.join(sorted(allow))} may change; revert this one")
+            elif deny_major and source is locked and _major(old) is not None and _major(new) != _major(old):
+                report(key, "major bump", old, new, "Stay on the current major version, or ask the human to allow the major upgrade")
+    return reports

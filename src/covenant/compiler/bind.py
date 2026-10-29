@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..ir import Clause, ClauseKind, ClauseStatus, OnViolation
 from .ground import RepoFacts
 from .schema import CandidateClause, Intent
@@ -108,7 +110,36 @@ class Binder:
             )]
 
         if intent is Intent.NO_DESTRUCTIVE_MIGRATIONS:
-            return [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, "schema_guard (migration checker) is not built yet")]
+            dirs = facts.migration_dirs or ["migrations", "alembic/versions", "prisma/migrations", "db/migrate"]
+            return [Clause(
+                id=self._id(), kind=ClauseKind.SEMANTIC_INVARIANT, source_span=c.source_span,
+                scope=[f"{d}/" for d in dirs], checker="schema_guard", params={"dirs": dirs, "baseline": "HEAD"},
+                assumptions=[f"migrations live in {', '.join(dirs)}"], confidence=0.8,
+            )]
         if intent is Intent.DEPENDENCY_SCOPE:
-            return [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, "dependency_diff (lockfile checker) is not built yet")]
+            names = [p for p in c.paths if "/" not in p and not p.endswith((".toml", ".json", ".txt", ".lock"))]
+            names += _named_packages(c.source_span)
+            params = {"baseline": "HEAD", "deny_major": bool(re.search(r"major", c.source_span, re.I)) or not names}
+            if names:
+                params["allow"] = list(dict.fromkeys(names))
+            return [Clause(
+                id=self._id(), kind=ClauseKind.SEMANTIC_INVARIANT, source_span=c.source_span,
+                scope=["dependency manifests and lockfiles"], checker="dependency_diff", params=params,
+                assumptions=[f"only {', '.join(names)} may change" if names else "any package may change, within its major version"],
+                confidence=0.7,
+            )]
         return [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, f"no checker exists for this kind of rule ({c.reading})")]
+
+
+def _named_packages(span: str) -> list[str]:
+    """Package names in phrases like "only update requests and urllib3"."""
+    m = re.search(
+        r"\b(?:only|just)\s+(?:update|upgrade|bump|change)\s+(?:the\s+)?(.+?)(?:\s+(?:dependenc\w*|packages?))?$",
+        span,
+        re.I,
+    )
+    if not m:
+        return []
+    words = re.split(r"\s*(?:,|\band\b|\bor\b)\s*", m.group(1))
+    names = [w.strip("`'\" ") for w in words]
+    return [n for n in names if re.fullmatch(r"[A-Za-z0-9@][\w.@/-]*", n)]

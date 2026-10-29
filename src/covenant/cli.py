@@ -54,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     claude = sub.add_parser("install-claude", help="install Claude Code hooks")
     claude.add_argument("--local", action="store_true", help="write to .claude/settings.local.json")
     sub.add_parser("claude-hook", help="called by Claude Code hooks (reads JSON on stdin)")
+    sub.add_parser("mcp", help="run the MCP server on stdio (for Cursor, Codex and other agents)")
     hook = sub.add_parser("hook", help="called by git hooks")
     hook.add_argument("name", choices=["pre-commit", "pre-push"])
 
@@ -210,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(output))
         return code
 
+    if args.command == "mcp":
+        from .integrations.mcp_server import CovenantMcpServer
+
+        CovenantMcpServer(repo, args.covenant, args.state_dir).serve()
+        return 0
     if args.command == "compile":
         return _compile(args, repo, covenant_path)
     if args.command == "ci":

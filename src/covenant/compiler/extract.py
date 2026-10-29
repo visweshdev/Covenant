@@ -124,7 +124,10 @@ _RULES: list[tuple[Intent, re.Pattern[str]]] = [
     (Intent.TESTS_BEFORE_COMMIT, re.compile(r"\btests?\b.*\bbefore\b.*\bcommit|\bcommit\b.*\bonly after\b.*\btests?\b|\btests?\b.*\bpass\b.*\bbefore\b", re.I)),
     (Intent.NO_PUSH, re.compile(rf"{_NEG}\s*push\b", re.I)),
     (Intent.NO_COMMIT, re.compile(rf"{_NEG}\s*commit\b", re.I)),
-    (Intent.DEPENDENCY_SCOPE, re.compile(rf"\b(only|just)\b.*\b(dependenc|packages?|versions?)|{_NEG}.*\bmajor (version|bump)", re.I)),
+    (Intent.DEPENDENCY_SCOPE, re.compile(
+        rf"\b(only|just)\b.*\b(dependenc|packages?|versions?)|\b(only|just)\s+(update|upgrade|bump)\b|{_NEG}.*\bmajor (version|bump|upgrade)",
+        re.I,
+    )),
     (Intent.OTHER, re.compile(rf"{_NEG}|\b(always|make sure|ensure|keep|must)\b", re.I)),
 ]
 

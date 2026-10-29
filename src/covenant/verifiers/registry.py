@@ -39,6 +39,16 @@ REGISTRY: dict[str, CheckerSpec] = {
             ("package",),
         ),
         CheckerSpec(
+            "schema_guard",
+            ClauseKind.SEMANTIC_INVARIANT,
+            "New or changed migrations drop no tables or columns and change no column types",
+        ),
+        CheckerSpec(
+            "dependency_diff",
+            ClauseKind.SEMANTIC_INVARIANT,
+            "Only allowed dependencies change, and locked versions keep their major version",
+        ),
+        CheckerSpec(
             "ts_api_surface_diff",
             ClauseKind.SEMANTIC_INVARIANT,
             "TypeScript exported names and types unchanged versus a baseline commit",
@@ -47,4 +57,4 @@ REGISTRY: dict[str, CheckerSpec] = {
 }
 
 # Named in the proposal but not built yet. Clauses bound to these are reported as unenforceable.
-PLANNED = {"schema_guard", "dependency_diff"}
+PLANNED: set[str] = set()
