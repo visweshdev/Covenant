@@ -1,0 +1,44 @@
+# Hand-written Covenant for the running example in the proposal.
+# The compiler will produce files like this one; for now we write them by hand
+# so the runtime can be tested before the compiler exists.
+covenant:
+  instruction: >-
+    Update dependencies, but don't change public APIs, don't delete user data,
+    and run tests before committing.
+  goal:
+    action: update_dependencies
+    scope: [pyproject.toml, poetry.lock]
+  clauses:
+    - id: C1
+      kind: SemanticInvariant
+      source_span: "don't change public APIs"
+      scope: ["mylib/__init__.py exports"]
+      checker: api_surface_diff
+      params: { language: python, package: mylib, baseline: HEAD, allow_additive: true }
+      on_violation: block
+      assumptions:
+        - "public = names exported from mylib/__init__.py"
+        - "CLI flags are not checked yet (no CLI verifier)"
+
+    - id: C2
+      kind: EffectProhibition
+      source_span: "don't delete user data"
+      scope: ["data/", "~/.mylib/"]
+      checker: effect_monitor
+      params:
+        deny: [delete, truncate, overwrite]
+        paths: ["data/**", "~/.mylib/**"]
+        exclude: ["~/.mylib/cache/**"]
+        db_tables: [users, uploads]
+      on_violation: rollback
+      assumptions:
+        - "~/.mylib/cache/ is not user data (answered by the developer)"
+
+    - id: C3
+      kind: TemporalObligation
+      source_span: "run tests before committing"
+      checker: trace_monitor
+      params:
+        formula: "G(commit -> (!edit S test_pass))"
+        test_cmd: "python -m pytest -q"
+      on_violation: block
