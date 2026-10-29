@@ -46,7 +46,8 @@ def detect_entries(repo_root: Path) -> list[str]:
     raise TsSurfaceError("no TypeScript entry file found; set params.entries")
 
 
-def extract(root: Path, entries: list[str], timeout: float = 300) -> dict[str, str]:
+def extract_full(root: Path, entries: list[str], timeout: float = 300) -> tuple[dict[str, str], dict[str, dict]]:
+    """(surface, signatures): display strings per exported name, plus structured call signatures."""
     node = shutil.which("node")
     if node is None:
         raise TsSurfaceError("node is not installed")
@@ -59,7 +60,35 @@ def extract(root: Path, entries: list[str], timeout: float = 300) -> dict[str, s
     )
     if result.returncode != 0:
         raise TsSurfaceError(result.stderr.strip() or f"extractor exited {result.returncode}")
-    return json.loads(result.stdout)
+    data = json.loads(result.stdout)
+    return data["surface"], data.get("sigs", {})
+
+
+def extract(root: Path, entries: list[str], timeout: float = 300) -> dict[str, str]:
+    return extract_full(root, entries, timeout)[0]
+
+
+def signatures_compatible(before: dict, after: dict) -> bool:
+    """True when every call that type-checked against `before` still type-checks against `after`.
+
+    Parameter names don't matter to TypeScript callers. Existing parameters keep their type
+    and kind (a required one may become optional); new parameters must be optional or a rest
+    parameter; type parameters and the return type are unchanged.
+    """
+    if before.get("typeParams") != after.get("typeParams") or before.get("ret") != after.get("ret"):
+        return False
+    old, new = before.get("params", []), after.get("params", [])
+    if len(new) < len(old):
+        return False
+    for o, n in zip(old, new):
+        if o["type"] != n["type"] or o["rest"] != n["rest"]:
+            return False
+        if o["optional"] and not n["optional"]:
+            return False
+    extra = new[len(old):]
+    if old and old[-1]["rest"] and extra:
+        return False
+    return all(n["optional"] or n["rest"] for n in extra)
 
 
 def materialize(repo_root: Path, ref: str) -> Path:
@@ -90,17 +119,26 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
     params = clause.params
     entries = list(params.get("entries") or detect_entries(repo_root))
     ref = baseline or params.get("baseline", "HEAD")
-    after = extract(repo_root, entries)
-    before = extract(materialize(repo_root, ref), entries)
+    after, after_sigs = extract_full(repo_root, entries)
+    before, before_sigs = extract_full(materialize(repo_root, ref), entries)
     diff = diff_surfaces(before, after)
+    additive_ok = params.get("allow_additive", True)
+
+    def compatible(symbol: str) -> bool:
+        return (
+            additive_ok
+            and symbol in before_sigs
+            and symbol in after_sigs
+            and signatures_compatible(before_sigs[symbol], after_sigs[symbol])
+        )
 
     def report(symbol: str, old: str | None, new: str | None) -> ViolationReport:
         entry, _, _ = symbol.partition(":")
         evidence = {"symbol": symbol, "before": old, "after": new, "exported_from": entry, "baseline": ref}
         return ViolationReport.for_clause(clause, evidence)
 
-    reports = [report(s, b, a) for s, (b, a) in diff.changed.items()]
+    reports = [report(s, b, a) for s, (b, a) in diff.changed.items() if not compatible(s)]
     reports += [report(s, b, None) for s, b in diff.removed.items()]
-    if not params.get("allow_additive", True):
+    if not additive_ok:
         reports += [report(s, None, a) for s, a in diff.added.items()]
     return reports

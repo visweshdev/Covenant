@@ -91,3 +91,51 @@ def test_interface_member_removal_and_additions(ts_repo):
 
 def test_entry_detection(ts_repo):
     assert ts_api_surface.detect_entries(ts_repo) == ["src/index.ts"]
+
+
+def _edit(repo, rel, old, new):
+    path = repo / rel
+    text = path.read_text()
+    assert old in text, old
+    path.write_text(text.replace(old, new))
+
+
+@pytest.mark.parametrize(
+    "rel, old, new",
+    [
+        # a new optional parameter
+        ("src/parse.ts", "options: Options = {}): Doc", "options: Options = {}, trim?: boolean): Doc"),
+        # a required parameter becomes optional; renaming it doesn't matter to callers
+        ("src/parse.ts", "parse(text: string,", "parse(input?: string,"),
+        # a method gains an optional parameter
+        ("src/index.ts", "get(path: string): Promise<string>", "get(path: string, retries = 0): Promise<string>"),
+        # a constructor gains an optional parameter
+        ("src/index.ts", "constructor(public readonly url: string)", "constructor(public readonly url: string, timeoutMs?: number)"),
+        # a new rest parameter
+        ("src/parse.ts", "options: Options = {}): Doc", "options: Options = {}, ...tags: string[]): Doc"),
+    ],
+)
+def test_additive_changes_are_allowed(ts_repo, rel, old, new):
+    if "input?: string" in new:
+        _edit(ts_repo, rel, "text.trim()", "(input ?? \"\").trim()")
+    _edit(ts_repo, rel, old, new)
+    assert ts_api_surface.verify(clause(), ts_repo) == []
+
+
+@pytest.mark.parametrize(
+    "rel, old, new",
+    [
+        ("src/parse.ts", "options: Options = {}): Doc", "options: Options = {}, trim: boolean): Doc"),  # new required
+        ("src/parse.ts", "parse(text: string,", "parse(text: number,"),  # type change
+        ("src/parse.ts", "): Doc {", "): Doc | null {"),  # return type change
+        ("src/index.ts", "get(path: string): Promise<string>", "get(path: string, retries: number): Promise<string>"),
+    ],
+)
+def test_breaking_changes_are_still_reported(ts_repo, rel, old, new):
+    _edit(ts_repo, rel, old, new)
+    assert ts_api_surface.verify(clause(), ts_repo) != []
+
+
+def test_additive_ok_can_be_turned_off(ts_repo):
+    _edit(ts_repo, "src/parse.ts", "options: Options = {}): Doc", "options: Options = {}, trim?: boolean): Doc")
+    assert ts_api_surface.verify(clause(allow_additive=False), ts_repo) != []

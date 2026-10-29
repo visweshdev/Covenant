@@ -1,4 +1,5 @@
-// Prints the exported API surface of TypeScript entry files as JSON: {"entry:Name": "signature"}.
+// Prints the exported API surface of TypeScript entry files as JSON:
+// {"surface": {"entry:Name": "signature"}, "sigs": {"entry:Name": {params, ret, typeParams}}}.
 // Usage: node ts_extract.js <root> <entry> [<entry> ...]
 // Uses the project's own `typescript` package (or COVENANT_TYPESCRIPT, a path to one).
 "use strict";
@@ -50,6 +51,29 @@ function isHidden(decl) {
   return (mods & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) !== 0;
 }
 
+// Structured call signatures, so the checker can tell additive changes from breaking ones.
+const sigs = {};
+
+function paramInfo(p) {
+  const d = p.valueDeclaration;
+  const optional = !!(d && (d.questionToken || d.initializer));
+  const rest = !!(d && d.dotDotDotToken);
+  const type = d && d.type
+    ? clean(d.type.getText())
+    : clean(checker.typeToString(checker.getTypeOfSymbolAtLocation(p, d), undefined, flags));
+  return { type, optional, rest };
+}
+
+function recordSigs(key, signatures) {
+  if (signatures.length !== 1) return; // overloads: compared as text only
+  const sig = signatures[0];
+  sigs[key] = {
+    params: sig.getParameters().map(paramInfo),
+    ret: clean(checker.typeToString(sig.getReturnType(), undefined, flags)),
+    typeParams: (sig.getTypeParameters() || []).map((tp) => clean(checker.typeToString(tp, undefined, flags))),
+  };
+}
+
 function members(out, prefix, type, decl) {
   for (const prop of checker.getPropertiesOfType(type)) {
     const pdecl = prop.valueDeclaration || (prop.declarations || [])[0];
@@ -58,6 +82,7 @@ function members(out, prefix, type, decl) {
     const readonly = pdecl && ts.getCombinedModifierFlags(pdecl) & ts.ModifierFlags.Readonly ? "readonly " : "";
     const ptype = checker.getTypeOfSymbolAtLocation(prop, pdecl || decl);
     out[`${prefix}.${prop.getName()}`] = `${readonly}${optional}${clean(checker.typeToString(ptype, undefined, flags))}`;
+    if (!optional) recordSigs(`${prefix}.${prop.getName()}`, ptype.getCallSignatures());
   }
 }
 
@@ -80,8 +105,9 @@ files.forEach((file, i) => {
     const S = ts.SymbolFlags;
     if (sym.flags & S.Class) {
       const ctor = checker.getTypeOfSymbolAtLocation(sym, decl);
-      const sigs = ctor.getConstructSignatures().map((s) => clean(checker.signatureToString(s, undefined, flags)));
-      out[name] = `class new${sigs.join(" | new") || "()"}`;
+      const ctorSigs = ctor.getConstructSignatures();
+      out[name] = `class new${ctorSigs.map((s) => clean(checker.signatureToString(s, undefined, flags))).join(" | new") || "()"}`;
+      recordSigs(name, ctorSigs);
       members(out, name, checker.getDeclaredTypeOfSymbol(sym), decl);
       members(out, `${name}.static`, ctor, decl);
       delete out[`${name}.static.prototype`];
@@ -97,10 +123,11 @@ files.forEach((file, i) => {
       const type = checker.getTypeOfSymbolAtLocation(sym, decl);
       const kind = sym.flags & S.Function ? "function" : sym.flags & S.ValueModule ? "namespace" : "const";
       out[name] = `${kind} ${clean(checker.typeToString(type, undefined, flags))}`;
+      recordSigs(name, type.getCallSignatures());
     } else {
       out[name] = "export";
     }
   }
 });
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(JSON.stringify({ surface: out, sigs }));
 process.exit(failed ? 4 : 0);
