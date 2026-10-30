@@ -72,6 +72,11 @@ def _parser() -> argparse.ArgumentParser:
     brun.add_argument("--out", default="bench-results.jsonl")
     brep = bench.add_parser("report", help="summarize result files")
     brep.add_argument("results", nargs="+")
+    srv = sub.add_parser("serve", help="run the hook server (HTTP hooks; keeps state away from the agent)")
+    srv.add_argument("--port", type=int, default=8787)
+    srv.add_argument("--bind", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
+    srv.add_argument("--url", help="URL the hooks should call (default: http://127.0.0.1:<port>)")
+    srv.add_argument("--install", action="store_true", help="point Claude Code and git hooks at this server, then start it")
     dash = sub.add_parser("dashboard", help="serve a read-only dashboard of every repo on this machine")
     dash.add_argument("--port", type=int, default=8765)
     dash.add_argument("--no-open", action="store_true", help="don't open a browser")
@@ -216,6 +221,28 @@ def _bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _serve(args: argparse.Namespace, repo: Path) -> int:
+    from . import server
+
+    try:
+        httpd = server.HookServer((args.bind, args.port), repo, args.covenant, args.state_dir)
+    except (OSError, ValueError) as exc:
+        print(f"covenant: can't start the hook server: {exc}", file=sys.stderr)
+        return 3
+    url = args.url or f"http://127.0.0.1:{httpd.server_address[1]}"
+    if args.install:
+        server.install(repo, url, httpd.token, repo / ".claude" / "settings.json")
+        print(f"covenant: Claude Code and git hooks now call {url}; run `covenant start` to re-approve", file=sys.stderr)
+    print(f"covenant: hook server for {repo} on {args.bind}:{httpd.server_address[1]} (hooks call {url})", file=sys.stderr)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+    return 0
+
+
 def _dashboard(args: argparse.Namespace) -> int:
     from . import dashboard
 
@@ -327,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "dashboard":
         return _dashboard(args)
+    if args.command == "serve":
+        return _serve(args, repo)
     if args.command == "bench":
         return _bench(args)
     if args.command == "compile":
