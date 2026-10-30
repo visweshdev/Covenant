@@ -3,6 +3,7 @@
   "displayName": "Covenant",
   "description": "See and manage the rules Covenant enforces on coding agents: live violations, protected files, approvals.",
   "version": "0.1.0",
+  "license": "MIT",
   "publisher": "covenant",
   "engines": {
     "vscode": "^1.100.0"
@@ -149,7 +150,7 @@
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
     "test": "tsc -p . && node --test \"out/test/*.test.js\"",
-    "package": "tsc -p . && vsce package --skip-license --allow-missing-repository",
+    "package": "tsc -p . && vsce package --allow-missing-repository",
     "test:e2e": "tsc -p . && node out/test-e2e/run.js"
   },
   "devDependencies": {

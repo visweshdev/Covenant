@@ -9,7 +9,7 @@ protected files however they were touched, and the order of events (tests passed
 last edit, before the commit).
 
 ```bash
-pip install -e .                       # from this checkout
+pip install covenant-agents            # or: pip install -e . from a checkout
 cd your-repo
 covenant compile "Update dependencies, but don't change public APIs, don't delete user data, and run tests before committing."
 covenant init                          # git hooks + Claude Code hooks, then start enforcing
@@ -217,6 +217,11 @@ These need tools this project's development machine doesn't have, so they couldn
 - **Live database proxy:** see and roll back SQL against Postgres or MySQL as it runs. SQLite
   databases are already guarded row by row (`sqlite_guard`), and migrations are checked by
   `schema_guard`. It needs a database server to test against.
-- **A real-repo CovenantBench:** the harness, metrics and five synthetic tasks exist. The
+- **A real-repo CovenantBench:** the harness, metrics and six synthetic tasks exist. The
   proposal's 60–200 tasks from real repos, using commits after the models' training cutoff and
   with annotated ground truth, are curation work.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and tests, and [SECURITY.md](SECURITY.md) to
+report a way around Covenant. Covenant is released under the [MIT License](LICENSE).

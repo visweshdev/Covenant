@@ -1,7 +1,7 @@
 # Covenant for VS Code
 
 See and manage the rules Covenant enforces on coding agents, right in the editor. Needs the
-`covenant` Python package (`pip install -e .` in the Covenant checkout).
+`covenant` command (`pip install covenant-agents`, or `pip install -e .` in a Covenant checkout).
 
 - **Status bar:** whether every rule holds, how many issues there are, or that tests are needed before the next commit.
 - **Rules panel** (the shield in the activity bar):

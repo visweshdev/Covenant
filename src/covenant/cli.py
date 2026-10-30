@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from .events import Commit, Edit, Effect, Push, Run
 from .integrations import claude_code
-from . import policy
+from . import __version__, policy
 from .ir import Covenant
 from .paths import default_state_dir
 from .runtime import Decision, Runtime
@@ -26,6 +26,7 @@ from .validate import validate
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="covenant", description=__doc__.splitlines()[0])
+    p.add_argument("--version", action="version", version=f"covenant {__version__}")
     p.add_argument("--repo", default=".", help="repository root (default: current folder)")
     p.add_argument("--covenant", help="Covenant file (default: <repo>/covenant.yaml)")
     p.add_argument("--state-dir", help="where the trace and snapshots live (default: ~/.covenant/workspaces/...)")
@@ -158,7 +159,7 @@ def _install_claude(repo: Path, state_dir: str | None, local: bool) -> int:
     if not claude_code.importable_outside_source():
         print(
             "covenant: warning: the hooks run `python -m covenant`, but this Python can't import covenant "
-            "from another folder. Run `pip install -e .` in the Covenant checkout.",
+            "from another folder. Install it with `pip install covenant-agents`, or `pip install -e .` in a checkout.",
             file=sys.stderr,
         )
     return 0
