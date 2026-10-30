@@ -36,6 +36,7 @@ covenant init                          # git hooks + Claude Code hooks, then sta
 |---|---|---|
 | Semantic invariant | `api_surface_diff` | Python exported names and signatures vs. the base commit (`ast`) |
 | Semantic invariant | `ts_api_surface_diff` | TypeScript exported types, via the project's own compiler |
+| Semantic invariant | `source_api_diff` | Go, Rust and Java public API, read from source (no compiler needed) |
 | Semantic invariant | `schema_guard` | No dropped tables or columns, truncation, unqualified deletes or type changes in new migrations |
 | Semantic invariant | `dependency_diff` | Only allowed packages change; locked versions keep their major version |
 | Effect prohibition | `effect_monitor` | Protected files and tables aren't deleted, truncated or overwritten, whatever does it; rolled back from a snapshot |
@@ -72,6 +73,38 @@ The hook fails closed: if it crashes before a tool call, the call is denied.
 command = "covenant"
 args = ["--repo", "/path/to/repo", "mcp"]
 ```
+
+## Team policies
+
+A repo's `covenant.yaml` can list `extends: [policies/team.yaml]`. Policy files hold clauses
+in the same format and can extend each other. `COVENANT_POLICY` (paths separated by your
+OS's path separator) applies policies to every repo on a machine.
+
+Policy rules:
+- are merged in first, with an `origin` naming their policy;
+- can't be redefined by a repo: an id clash is an error;
+- are protected from the agent like Covenant's own files;
+- in CI, come from the base commit, and a PR that changes them is flagged.
+
+## Dashboard
+
+`covenant dashboard` opens a read-only page on `127.0.0.1:8765` covering every repo Covenant enforces
+on this machine:
+- each repo's rules, with how close each is to handing over to a human;
+- a timeline of blocks and reports;
+- recent events and protected paths.
+
+It refreshes every few seconds, answers GET only, and rejects requests whose Host header isn't localhost.
+
+## Hook server
+
+`covenant serve --install` runs Covenant as a long-lived local server.
+- **Claude Code** uses HTTP hooks to reach it at `/hook`.
+- **Git** hooks call it with `curl`, and refuse the commit if it's unreachable.
+
+State and snapshots then live with the server instead of wherever the agent runs, which is
+the building block for running agents in a container. Requests need a bearer token created at
+start; that keeps other local processes out, but not an agent that can read the hook settings.
 
 ## VS Code
 
@@ -110,6 +143,9 @@ How the CI check judges a pull request:
 | `covenant test` / `check` / `status` | Runs the declared tests / every check / shows the state |
 | `covenant ci` | Checks a pull request (`--base`, `--format github\|json\|text`, `--no-tests`) |
 | `covenant mcp` | Runs the MCP server |
+| `covenant serve` | Runs the hook server (`--install` points Claude Code and git at it) |
+| `covenant dashboard` | Opens the local dashboard |
+| `covenant bench run` / `report` | Runs and scores CovenantBench (see `bench/README.md`) |
 
 Exit codes: 0 clean, 1 violations (the agent should revise), 2 needs a human, 3 bad setup.
 
@@ -133,15 +169,29 @@ npm install --prefix /tmp/ts typescript@5.6.3   # for the TypeScript checker tes
 COVENANT_TYPESCRIPT=/tmp/ts/node_modules/typescript python -m pytest -q
 ```
 
-Layout: `src/covenant/` holds the rule format (`ir.py`), `runtime.py`, `monitors/`, `verifiers/`,
-`compiler/`, `integrations/` (Claude Code and MCP), `ci.py` and `cli.py`. The worked example
-from the proposal is in `examples/mylib`.
+Layout of `src/covenant/`:
+- `ir.py`: the rule format;
+- `policy.py`: team policies;
+- `runtime.py`, `monitors/` and `verifiers/`: enforcement;
+- `compiler/`;
+- `integrations/`: Claude Code and MCP;
+- `ci.py`, `server.py`, `dashboard.py` and `cli.py`;
+- `bench/`: CovenantBench.
+
+The worked example from the proposal is in `examples/mylib`. The benchmark tasks are in
+`bench/tasks/`, and the VS Code extension is in `vscode-extension/`.
 
 ## Not built yet
 
-- **Sandbox:** a container with copy-on-write storage, so the agent can't reach Covenant's state.
-  Today the snapshot copies files aside and detects changes by hash.
-- **Database proxy:** to see and roll back live SQL.
-- **API checkers for Go, Java and Rust.**
-- **Web dashboard and team-wide policies.**
-- **CovenantBench:** the evaluation suite from the proposal.
+These need tools this project's development machine doesn't have, so they couldn't be built and tested:
+
+- **Container sandbox:** run the agent in a container or VM that can't see Covenant's state.
+  The hook server is the piece that makes this work. What's missing is the container image, a
+  bind mount of the repo, the hook URL pointing at the host, and copy-on-write snapshots in
+  place of the file copies. It needs Docker or WSL to build and test.
+- **Live database proxy:** see and roll back SQL against Postgres or MySQL as it runs. SQLite
+  files are already protected like any other file, and migrations are checked by `schema_guard`.
+  It needs a database server to test against.
+- **A real-repo CovenantBench:** the harness, metrics and five synthetic tasks exist. The
+  proposal's 60–200 tasks from real repos, using commits after the models' training cutoff and
+  with annotated ground truth, are curation work.
