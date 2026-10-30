@@ -57,3 +57,62 @@ def test_yesterday_once_historically():
 def test_bad_formulas(bad):
     with pytest.raises(FormulaError):
         parse_formula(bad)
+
+
+# ----- bounded and counting operators ----------------------------------------
+
+E, T, C = Edit(path="a"), PASS, Commit()
+
+
+def test_count_limits():
+    assert run("G(#push <= 1)", [Push(), C, Push()]) == [True, True, False]
+    assert run("#commit == 0", [E, C]) == [True, False]
+    assert run("commit -> #test_pass >= 2", [T, C, T, C]) == [True, False, True, True]
+
+
+def test_within_recent_steps():
+    assert run("commit -> O[<=1] test_pass", [T, C]) == [True, True]
+    assert run("commit -> O[<=1] test_pass", [T, E, C]) == [True, True, False]  # 2 steps back
+    assert run("commit -> O[<1] test_pass", [T, C]) == [True, False]
+    assert run("H[<=1] !edit", [E, C, C]) == [False, False, True]
+
+
+def test_deadline_after_edit():
+    deadline = "G(!(!test S[>=2] edit))"  # tests within 2 steps of any edit
+    assert run(deadline, [E, C, T, C, C]) == [True, True, True, True, True]
+    assert run(deadline, [E, C, C]) == [True, True, False]
+    assert run(deadline, [E, E, C]) == [True, True, False]  # the first edit has gone 2 steps
+
+
+def _since(a, b, cmp, n, events):
+    """Reference meaning of a S[cmp n] b at the last step, by brute force."""
+    import operator
+    op = {"<=": operator.le, "<": operator.lt, ">=": operator.ge, ">": operator.gt}[cmp]
+    t = len(events) - 1
+    return any(b(events[j]) and op(t - j, n) and all(a(e) for e in events[j + 1:]) for j in range(t + 1))
+
+
+@pytest.mark.parametrize("cmp", ["<=", "<", ">=", ">"])
+def test_bounded_since_matches_definition(cmp):
+    import itertools
+    is_edit, not_test = (lambda e: e.type == "edit"), (lambda e: e.type != "test")
+    for length in range(1, 7):
+        for events in itertools.product([E, T, C], repeat=length):
+            for n in range(4):
+                got = run(f"!test S[{cmp}{n}] edit", list(events))
+                want = [_since(not_test, is_edit, cmp, n, list(events[:k + 1])) for k in range(length)]
+                assert got == want, (cmp, n, events)
+
+
+def test_bounded_peek_does_not_change_state():
+    monitor = TraceMonitor("G(#commit <= 1)")
+    monitor.step(C)
+    assert monitor.peek(C)[0] is False
+    assert monitor.peek(C)[0] is False
+    assert monitor.step(E) is True
+
+
+@pytest.mark.parametrize("bad", ["#commit", "#commit <= x", "O[>=2] edit", "edit S[==1] commit", "O[<=2 edit", "Y[<=1] edit"])
+def test_bad_bounded_formulas(bad):
+    with pytest.raises(FormulaError):
+        parse_formula(bad)

@@ -76,3 +76,16 @@ test("tampering points at the tampered file when it is inside the repo", () => {
   assert.deepEqual(locate(r, access, "covenant.yaml"), { file: ".claude/settings.json", line: 0 });
   assert.match(message(r), /disableAllHooks is set/);
 });
+
+test("Go, Rust and Java API changes use the line the checker found", () => {
+  const go = report({ checker: "source_api_diff", evidence: { symbol: "store:Store.Size", before: "int", after: "int64", file: "store/store.go", line: 12 } });
+  assert.deepEqual(locate(go, access, "covenant.yaml"), { file: "store/store.go", line: 11 });
+  const unplaced = report({ violation: "C3", checker: "source_api_diff", evidence: { symbol: "crate::gone", before: "fn()", after: null } });
+  assert.deepEqual(locate(unplaced, access, "covenant.yaml"), { file: "covenant.yaml", line: 5 });
+});
+
+test("a used-up action limit says so", () => {
+  const r = report({ checker: "trace_monitor", kind: "TemporalObligation", repair_hints: [],
+    evidence: { formula: "G(#push <= 1)", counts_so_far: { push: 1 }, edits_since_last_passing_test: [] } });
+  assert.match(message(r), /limit reached \(so far: push 1\)/);
+});

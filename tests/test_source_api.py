@@ -98,3 +98,36 @@ def test_compiler_binds_source_api(tmp_path, language, test_cmd):
     api, tests = cov.clauses
     assert api.checker == "source_api_diff" and api.params["language"] == language
     assert tests.params["test_cmd"] == test_cmd
+
+
+def places(repo):
+    """symbol -> (file, the text of the reported line)."""
+    out = {}
+    for r in source_api.verify(clause(), repo):
+        ev = r.evidence
+        out[ev["symbol"]] = (ev["file"], (repo / ev["file"]).read_text().splitlines()[ev["line"] - 1].strip())
+    return out
+
+
+def test_reports_point_at_the_definition(tmp_path):
+    go = make_repo(tmp_path, "go")
+    edit(go, "store/store.go", "Size, Cap int", "Size int64\n\tCap int")
+    edit(go, "store/store.go", "\tRead(key string) ([]byte, error)\n", "")
+    got = places(go)
+    assert got["store:Store.Size"] == ("store/store.go", "Size int64")
+    assert got["store:Reader.Read"][0] == "store/store.go" and got["store:Reader.Read"][1].startswith("type Reader")
+
+    rust = make_repo(tmp_path, "rust")
+    edit(rust, "src/lib.rs", "pub fn len(&self) -> usize", "pub fn len(&self) -> u64")
+    edit(rust, "src/parse.rs", "pub async fn run(&mut self, src: &str)", "pub async fn run(&mut self, src: &str, strict: bool)")
+    got = places(rust)
+    assert got["crate::Doc::len"][0] == "src/lib.rs" and got["crate::Doc::len"][1].startswith("pub fn len")
+    assert got["crate::parse::Parser::run"][0] == "src/parse.rs" and "fn run" in got["crate::parse::Parser::run"][1]
+
+    java = make_repo(tmp_path, "java")
+    client = "src/main/java/com/acme/Client.java"
+    edit(java, client, "public static final int TIMEOUT = 30;", "public static final long TIMEOUT = 30;")
+    edit(java, "src/main/java/com/acme/Api.java", "    String fetch(String id);", "    String fetch(String id, int version);")
+    got = places(java)
+    assert got["com.acme.Client.TIMEOUT"] == (client, "public static final long TIMEOUT = 30;")
+    assert got["com.acme.Api.fetch(String)"] == ("src/main/java/com/acme/Api.java", "String fetch(String id, int version);")

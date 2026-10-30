@@ -15,6 +15,8 @@ class Intent(str, Enum):
     TESTS_BEFORE_PUSH = "tests_before_push"
     NO_COMMIT = "no_commit"
     NO_PUSH = "no_push"
+    ACTION_LIMIT = "action_limit"
+    TESTS_WITHIN_STEPS = "tests_within_steps"
     NO_DESTRUCTIVE_MIGRATIONS = "no_destructive_migrations"
     DEPENDENCY_SCOPE = "dependency_scope"
     OTHER = "other"
@@ -28,6 +30,8 @@ INTENT_HELP = {
     Intent.TESTS_BEFORE_PUSH: "a passing test run must come before each push",
     Intent.NO_COMMIT: "the agent must not commit at all",
     Intent.NO_PUSH: "the agent must not push at all",
+    Intent.ACTION_LIMIT: "the agent may commit or push at most a stated number of times",
+    Intent.TESTS_WITHIN_STEPS: "after each edit, the tests must run within a stated number of agent steps",
     Intent.NO_DESTRUCTIVE_MIGRATIONS: "no database migration may drop tables or columns or narrow types",
     Intent.DEPENDENCY_SCOPE: "only certain dependencies or version ranges may change",
     Intent.OTHER: "any other constraint (style, readability, process) with no automatic check",

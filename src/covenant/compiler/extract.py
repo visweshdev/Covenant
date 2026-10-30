@@ -151,6 +151,9 @@ _RULES: list[tuple[Intent, re.Pattern[str]]] = [
     (Intent.NO_DESTRUCTIVE_MIGRATIONS, re.compile(r"\bdestructive\s+migrations?\b|\bdrop\s+(?:any\s+)?(?:columns?|tables?)\b", re.I)),
     (Intent.NO_DATA_LOSS, re.compile(rf"{_NEG}.*\b(delete|remove|wipe|lose|drop|destroy|erase|overwrite|truncate|clear|rm)\b", re.I)),
     (Intent.PROTECT_PATHS, re.compile(rf"{_NEG}\s*(?:\w+\s+)?(touch|modify|edit|change|alter)\b", re.I)),
+    (Intent.ACTION_LIMIT, re.compile(
+        r"\b(commit|push)\w*\b.*\b(at most|no more than|more than|only|max(?:imum)?(?: of)?)\s+(once|twice|(?:\w+\s+){1,2}times?|\d+)\b", re.I)),
+    (Intent.TESTS_WITHIN_STEPS, re.compile(r"\btests?\b.*\bwithin\s+\w+\s+(steps?|actions?|tool calls?)\b", re.I)),
     (Intent.TESTS_BEFORE_PUSH, re.compile(r"\btests?\b.*\bbefore\b.*\bpush|\bpush\b.*\bonly after\b.*\btests?\b", re.I)),
     (Intent.TESTS_BEFORE_COMMIT, re.compile(r"\btests?\b.*\bbefore\b.*\bcommit|\bcommit\b.*\bonly after\b.*\btests?\b|\btests?\b.*\bpass\b.*\bbefore\b", re.I)),
     (Intent.NO_PUSH, re.compile(rf"{_NEG}\s*push\b", re.I)),

@@ -9,6 +9,23 @@ from .ground import DB_SUFFIXES, RepoFacts
 from .schema import CandidateClause, Intent
 
 TESTS_BEFORE = "G({action} -> (!edit S test_pass))"
+TESTS_WITHIN = "G(!(!test S[>={n}] edit))"
+
+_NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve".split())}
+
+
+def _count(span: str, unit: str = "") -> int | None:
+    """The number in phrases like "at most twice", "no more than 3 times", "within five steps"."""
+    if not unit and re.search(r"\bonce\b", span, re.I):
+        return 1
+    if not unit and re.search(r"\btwice\b", span, re.I):
+        return 2
+    m = re.search(rf"\b(\d+|{'|'.join(_NUMBER_WORDS)})\s+{unit or 'times?'}", span, re.I)
+    if not m:
+        return None
+    word = m.group(1).lower()
+    return int(word) if word.isdigit() else _NUMBER_WORDS[word]
 
 
 def _as_glob(path: str) -> str:
@@ -137,6 +154,42 @@ class Binder:
             return [Clause(
                 id=self._id(), kind=ClauseKind.TEMPORAL_OBLIGATION, source_span=c.source_span,
                 checker="trace_monitor", params={"formula": f"G(!{action})"}, confidence=0.95,
+            )]
+
+        if intent is Intent.ACTION_LIMIT:
+            actions = [a for a in ("commit", "push") if re.search(rf"\b{a}", c.source_span, re.I)] or ["push"]
+            n = _count(c.source_span)
+            if n is None:
+                return [Clause(
+                    id=self._id(), kind=ClauseKind.TEMPORAL_OBLIGATION, source_span=c.source_span,
+                    checker="trace_monitor", params={"formula": f"G(#{actions[0]} <= 1)"},
+                    status=ClauseStatus.PENDING_CLARIFICATION,
+                    assumptions=["the limit isn't a number Covenant can read; set it in the formula"], confidence=0.4,
+                )]
+            return [Clause(
+                id=self._id(), kind=ClauseKind.TEMPORAL_OBLIGATION, source_span=c.source_span,
+                checker="trace_monitor", params={"formula": "G(" + " & ".join(f"#{a} <= {n}" for a in actions) + ")"},
+                assumptions=[f"{' and '.join(actions)}: at most {n} time{'s' if n != 1 else ''} each for the whole task"],
+                confidence=0.9,
+            )]
+
+        if intent is Intent.TESTS_WITHIN_STEPS:
+            n = _count(c.source_span, r"(?:steps?|actions?|tool calls?)")
+            params: dict = {"formula": TESTS_WITHIN.format(n=n or 3)}
+            if facts.test_commands:
+                params["test_cmd"] = facts.test_commands[0][0]
+            if n is None:
+                return [Clause(
+                    id=self._id(), kind=ClauseKind.TEMPORAL_OBLIGATION, source_span=c.source_span,
+                    checker="trace_monitor", params=params, status=ClauseStatus.PENDING_CLARIFICATION,
+                    assumptions=["the number of steps isn't clear; 3 is a placeholder"], confidence=0.4,
+                )]
+            return [Clause(
+                id=self._id(), kind=ClauseKind.TEMPORAL_OBLIGATION, source_span=c.source_span,
+                checker="trace_monitor", params=params,
+                assumptions=[f"a step is one agent action (an edit, a command, a commit); the tests must run within {n} of them after any edit"]
+                + ([f"tests = `{params['test_cmd']}`"] if "test_cmd" in params else []),
+                confidence=0.8,
             )]
 
         if intent is Intent.NO_DESTRUCTIVE_MIGRATIONS:

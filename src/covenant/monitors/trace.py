@@ -10,11 +10,21 @@ at a time (each subformula keeps only its value at the previous step).
     O a         a held at some step so far
     H a         a has held at every step so far
 
+Bounded forms count steps back from the current one (0 = this step):
+    O[<=n] a    a held within the last n steps
+    H[<=n] a    a held at each of the last n steps (and this one)
+    a S[<=n] b  b held at most n steps ago, and a has held at every step after it
+    a S[>=n] b  the same with b at least n steps ago; deadlines read as
+                !(!test S[>=3] edit): no edit has gone 3 steps without a test
+    #a <= n     a has held at most n times so far (also <, >=, >, ==)
+
 Atoms are predicates over one event: edit, run, test, test_pass, test_fail,
 commit, push, effect.
 
-Example: G(commit -> (!edit S test_pass)) - every commit comes after a passing
-test run, with no edit in between.
+Examples:
+    G(commit -> (!edit S test_pass))   every commit follows a passing test run, no edit in between
+    G(#push <= 1)                      push at most once
+    G(!(!test S[>=5] edit))            run the tests within 5 steps of any edit
 """
 
 from __future__ import annotations
@@ -36,7 +46,11 @@ ATOMS: dict[str, Callable[[Event], bool]] = {
     "effect": lambda e: e.type == "effect",
 }
 
-_TOKEN = re.compile(r"->|[()!&|]|[A-Za-z_][A-Za-z0-9_]*")
+_TOKEN = re.compile(r"->|<=|>=|==|[()!&|\[\]<>#]|\d+|[A-Za-z_][A-Za-z0-9_]*")
+_CMP = {
+    "<=": lambda a, b: a <= b, "<": lambda a, b: a < b, ">=": lambda a, b: a >= b,
+    ">": lambda a, b: a > b, "==": lambda a, b: a == b,
+}
 _ATOM = re.compile(r"[a-z_][a-z0-9_]*")
 
 
@@ -46,9 +60,11 @@ class FormulaError(ValueError):
 
 @dataclass(frozen=True)
 class Node:
-    op: str  # atom, true, false, !, &, |, ->, S, Y, O, H
+    op: str  # atom, true, false, !, &, |, ->, S, Y, O, H, #
     children: tuple[Node, ...] = ()
     atom: str | None = None
+    cmp: str | None = None  # bounded S and #: the comparison and its number
+    n: int | None = None
 
 
 def _tokenize(text: str) -> list[str]:
@@ -116,17 +132,54 @@ class _Parser:
         left = self.unary()
         while self.peek() == "S":
             self.take()
-            left = Node("S", (left, self.unary()))
+            bound = self.bound(("<=", "<", ">=", ">"))
+            cmp, n = bound
+            left = Node("S", (left, self.unary()), cmp=cmp, n=n)
         return left
+
+    def number(self) -> int:
+        tok = self.take()
+        if not tok.isdigit():
+            raise FormulaError(f"expected a number, got {tok!r}")
+        return int(tok)
+
+    def bound(self, allowed: tuple[str, ...]) -> tuple[str | None, int | None]:
+        """An optional [cmp n] after S, O or H."""
+        if self.peek() != "[":
+            return None, None
+        self.take()
+        cmp = self.take()
+        if cmp not in allowed:
+            raise FormulaError(f"expected one of {' '.join(allowed)} in the bound, got {cmp!r}")
+        n = self.number()
+        self.take("]")
+        return cmp, n
 
     def unary(self) -> Node:
         tok = self.peek()
         if tok == "!":
             self.take()
             return Node("!", (self.unary(),))
-        if tok in ("Y", "O", "H"):
+        if tok == "Y":
             self.take()
             return Node(tok, (self.unary(),))
+        if tok in ("O", "H"):
+            self.take()
+            cmp, n = self.bound(("<=", "<"))
+            sub = self.unary()
+            if cmp is None:
+                return Node(tok, (sub,))
+            if tok == "O":  # O[c] a  =  true S[c] a
+                return Node("S", (Node("true"), sub), cmp=cmp, n=n)
+            # H[c] a  =  !O[c] !a
+            return Node("!", (Node("S", (Node("true"), Node("!", (sub,))), cmp=cmp, n=n),))
+        if tok == "#":
+            self.take()
+            sub = self.unary()
+            cmp = self.take()
+            if cmp not in _CMP:
+                raise FormulaError(f"expected a comparison such as <= after #, got {cmp!r}")
+            return Node("#", (sub,), cmp=cmp, n=self.number())
         if tok == "(":
             self.take()
             node = self.implies()
@@ -155,12 +208,14 @@ class TraceMonitor:
     _nodes: list[Node] = field(init=False, repr=False)
     _kids: list[tuple[int, ...]] = field(init=False, repr=False)
     _prev: list[bool] = field(init=False, repr=False)
+    _aux: list[int | None] = field(init=False, repr=False)  # step distances and counts
     _first: bool = field(init=False, default=True)
 
     def __post_init__(self) -> None:
         self._nodes, self._kids = [], []
         self._flatten(parse_formula(self.formula))
         self._prev = [False] * len(self._nodes)
+        self._aux = [None] * len(self._nodes)
 
     def _flatten(self, node: Node) -> int:
         kids = tuple(self._flatten(c) for c in node.children)
@@ -168,10 +223,11 @@ class TraceMonitor:
         self._kids.append(kids)
         return len(self._nodes) - 1
 
-    def peek(self, event: Event) -> tuple[bool, list[bool]]:
+    def peek(self, event: Event) -> tuple[bool, tuple[list[bool], list[int | None]]]:
         """Evaluate the formula as if `event` happened next, without recording it."""
         now = [False] * len(self._nodes)
-        first, prev = self._first, self._prev
+        aux: list[int | None] = [None] * len(self._nodes)
+        first, prev, prev_aux = self._first, self._prev, self._aux
         for i, (node, kids) in enumerate(zip(self._nodes, self._kids)):
             c = [now[k] for k in kids]
             op = node.op
@@ -195,16 +251,29 @@ class TraceMonitor:
                 v = c[0] or ((not first) and prev[i])
             elif op == "H":
                 v = c[0] and (first or prev[i])
-            elif op == "S":
+            elif op == "S" and node.cmp is None:
                 v = c[1] or (c[0] and (not first) and prev[i])
+            elif op == "S":
+                # Steps back to the b that the chain of a's reaches: the nearest one for
+                # an upper bound, the oldest one for a lower bound.
+                chain = None if first or not c[0] or prev_aux[i] is None else prev_aux[i] + 1
+                if node.cmp in ("<=", "<"):
+                    d = 0 if c[1] else chain
+                else:
+                    d = chain if chain is not None else (0 if c[1] else None)
+                aux[i] = d
+                v = d is not None and _CMP[node.cmp](d, node.n)
+            elif op == "#":
+                aux[i] = (0 if first else prev_aux[i]) + int(c[0])
+                v = _CMP[node.cmp](aux[i], node.n)
             else:  # pragma: no cover - parser only builds known ops
                 raise FormulaError(op)
             now[i] = v
-        return now[-1], now
+        return now[-1], (now, aux)
 
-    def advance(self, state: list[bool]) -> None:
+    def advance(self, state: tuple[list[bool], list[int | None]]) -> None:
         """Record an event whose state came from `peek`."""
-        self._prev, self._first = state, False
+        (self._prev, self._aux), self._first = state, False
 
     def step(self, event: Event) -> bool:
         ok, state = self.peek(event)

@@ -62,6 +62,12 @@ export function locate(report: Report, files: FileAccess, covenantRel: string): 
     return { file: target.replace(/\\/g, "/"), line };
   }
 
+  // Go, Rust and Java API changes: the checker found the definition itself.
+  const file = str(ev.file);
+  if (file && typeof ev.line === "number" && report.checker === "source_api_diff") {
+    return { file: file.replace(/\\/g, "/"), line: Math.max(0, ev.line - 1) };
+  }
+
   const symbol = str(ev.symbol);
   if (symbol && report.checker === "api_surface_diff") {
     const parts = symbol.split(".");
@@ -102,6 +108,9 @@ export function message(report: Report): string {
     detail = `${ev.operation}: ${ev.code ?? ""}`;
   } else if (str(ev.target)) {
     detail = `${ev.pending ? "changed" : String(ev.op ?? "changed")} ${ev.target}${ev.pending ? " (will be restored at the agent's next step)" : ""}`;
+  } else if (ev.counts_so_far && typeof ev.counts_so_far === "object") {
+    const counts = Object.entries(ev.counts_so_far as Record<string, number>).map(([a, n]) => `${a} ${n}`).join(", ");
+    detail = `limit reached (so far: ${counts})`;
   } else if (Array.isArray(ev.edits_since_last_passing_test)) {
     detail = ev.last_passing_test ? "files changed since the last passing test run" : "no passing test run yet";
   } else if (str(ev.problem)) {

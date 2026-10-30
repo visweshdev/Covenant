@@ -42,10 +42,28 @@ covenant init                          # git hooks + Claude Code hooks, then sta
 | Semantic invariant | `dependency_diff` | Only allowed packages change; locked versions keep their major version |
 | Semantic invariant | `sqlite_guard` | Rows, tables and columns in SQLite databases are never lost; inserts are allowed. Checked after every step, and lost rows are put back from a snapshot |
 | Effect prohibition | `effect_monitor` | Protected files and tables aren't deleted, truncated or overwritten, whatever does it; rolled back from a snapshot |
-| Temporal obligation | `trace_monitor` | Ordering rules in past-time LTL, e.g. `G(commit -> (!edit S test_pass))` |
+| Temporal obligation | `trace_monitor` | Ordering, limit and deadline rules over the agent's steps, in past-time LTL (see below) |
 
 A rule with no checker ("keep the code readable") is kept and marked `unenforceable`,
 never silently dropped.
+
+### Rules over the agent's steps
+
+A step is one recorded action: an edit, a command, a test run, a commit or a push.
+
+| Instruction | Formula |
+|---|---|
+| "run tests before committing" | `G(commit -> (!edit S test_pass))` |
+| "never push" | `G(!push)` |
+| "push at most once", "don't commit more than 3 times" | `G(#push <= 1)`, `G(#commit <= 3)` |
+| "run the tests within 5 steps of any edit" | `G(!(!test S[>=5] edit))` |
+
+The operators:
+- `S` (since), `Y` (previous step), `O` (at some step so far) and `H` (at every step so far);
+- bounded forms of these, `O[<=n]`, `H[<=n]` and `a S[<=n] b` / `a S[>=n] b`, which count steps back;
+- `#a <= n` (also `<`, `>=`, `>`, `==`), which counts how often `a` has happened.
+
+A limit counts every commit or push this task, including ones later undone with `git reset`.
 
 ## Agents
 

@@ -231,3 +231,49 @@ def test_endpoint_note():
     note = endpoint_note({"ANTHROPIC_BASE_URL": "https://openrouter.ai/api"})
     assert "openrouter.ai" in note and "COVENANT_ANTHROPIC_BASE_URL" in note
     assert endpoint_note({"ANTHROPIC_BASE_URL": "https://openrouter.ai/api", "COVENANT_ANTHROPIC_BASE_URL": "https://api.anthropic.com"}) is None
+
+
+@pytest.mark.parametrize(
+    ("instruction", "formula", "status"),
+    [
+        ("Fix the login bug, and push at most once", "G(#push <= 1)", ClauseStatus.ENFORCED),
+        ("Fix the login bug. Don't commit more than 3 times", "G(#commit <= 3)", ClauseStatus.ENFORCED),
+        ("Fix the login bug. Commit and push no more than twice", "G(#commit <= 2 & #push <= 2)", ClauseStatus.ENFORCED),
+        ("Fix the login bug. Run the tests within five steps of any edit", "G(!(!test S[>=5] edit))", ClauseStatus.ENFORCED),
+        ("Fix the login bug. Push only a few times", "G(#push <= 1)", ClauseStatus.PENDING_CLARIFICATION),
+    ],
+)
+def test_limits_and_deadlines(instruction, formula, status, mylib_repo):
+    cov = compile_instruction(instruction, mylib_repo, HeuristicExtractor()).covenant
+    [clause] = [c for c in cov.clauses if c.checker == "trace_monitor"]
+    assert clause.params["formula"] == formula and clause.status is status
+
+
+def test_limit_is_enforced_end_to_end(mylib_repo, tmp_path):
+    from covenant.events import Push
+    from covenant.runtime import Runtime
+
+    compile_instruction("Fix the login bug, and push at most once", mylib_repo, HeuristicExtractor()).covenant.dump(mylib_repo / "covenant.yaml")
+    rt = Runtime.open(mylib_repo, state_dir=tmp_path / "state")
+    rt.start()
+    assert rt.record(Push()).allowed
+    d = rt.record(Push())
+    assert not d.allowed and d.blocking[0].evidence["counts_so_far"] == {"push": 1}
+    assert "limit is reached" in d.blocking[0].repair_hints[0]
+
+
+def test_deadline_is_enforced_end_to_end(mylib_repo, tmp_path):
+    from covenant.events import Commit, Edit, Run
+    from covenant.runtime import Runtime
+
+    instruction = "Fix the login bug. Run the tests within 2 steps of any edit"
+    compile_instruction(instruction, mylib_repo, HeuristicExtractor()).covenant.dump(mylib_repo / "covenant.yaml")
+    rt = Runtime.open(mylib_repo, state_dir=tmp_path / "state")
+    rt.start()
+    assert rt.record(Edit(path="mylib/core.py")).reports == []
+    assert rt.record(Run(cmd="ls", exit_code=0)).reports == []
+    late = rt.record(Run(cmd="ls", exit_code=0))  # second step after the edit, still no tests
+    assert late.reports and "Run the tests now" in late.reports[0].repair_hints[0]
+    assert not rt.record(Commit()).allowed
+    rt.run_tests()
+    assert rt.record(Commit()).allowed

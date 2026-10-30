@@ -8,7 +8,7 @@ See and manage the rules Covenant enforces on coding agents, right in the editor
   - each rule with its scope, the assumptions it was compiled under, its current violations, and how often it has blocked the agent this task;
   - a log of recent blocks.
 - **Problems:** each violation appears at the place it's about:
-  - the changed function's definition;
+  - the changed function's or type's definition (Python, TypeScript, Go, Rust and Java);
   - the protected file;
   - the migration line;
   - the dependency in `package.json` or `pyproject.toml`;

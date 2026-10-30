@@ -449,6 +449,65 @@ def java_surface(files: Files) -> dict[str, str]:
     return out
 
 
+# ----- where an item lives ---------------------------------------------------------------
+
+
+def _names(symbol: str, language: str) -> tuple[str, list[str]]:
+    """(scope, [item name, enclosing name, ...]) from a surface key."""
+    if language == "go":
+        scope, _, rest = symbol.partition(":")
+        parts = rest.split(".")
+    elif language == "rust":
+        parts = symbol.split("::")
+        scope = "::".join(parts[:-1])
+    else:
+        bare = symbol.split("(", 1)[0]
+        parts = bare.split(".")
+        scope = ".".join(parts[:-1])
+    names = [re.sub(r"^<(?:embeds|use)\s+(.+)>$", r"\1", n).split(".")[-1].split("::")[-1] for n in reversed(parts)]
+    return scope, [n for n in names if re.fullmatch(r"\w+", n)]
+
+
+def _candidate_files(files: Files, symbol: str, language: str, scope: str) -> list[str]:
+    if language == "go":
+        return [f for f in files if (f.rsplit("/", 1)[0] if "/" in f else ".") == scope]
+    if language == "rust":  # the deepest module whose path is a prefix of the item's path
+        ranked = sorted(
+            (f for f in files if symbol.startswith(_rust_module(f) + "::")),
+            key=lambda f: -len(_rust_module(f)),
+        )
+        return ranked
+    classes = [c for c in scope.split(".") if c[:1].isupper()]
+    return [f for f in files if classes and f.endswith(f"/{classes[0]}.java") or f == f"{classes[0] if classes else ''}.java"] or list(files)
+
+
+def _definition_patterns(name: str, language: str) -> list[re.Pattern[str]]:
+    n = re.escape(name)
+    if language == "go":
+        strict = [rf"^\s*func\s+(?:\([^)]*\)\s*)?{n}\b", rf"^\s*type\s+{n}\b", rf"^\s*(?:const|var)\s+{n}\b"]
+        loose = [rf"^\s*{n}(?:\s*,\s*\w+)*\s+[^=:(]", rf"^\s*{n}\s*\(", rf"^\s*{n}\b"]
+    elif language == "rust":
+        strict = [rf"\b(?:fn|struct|enum|trait|union|const|static|type|mod)\s+{n}\b"]
+        loose = [rf"^\s*(?:pub\s+)?{n}\s*[:({{,]", rf"^\s*(?:pub\s+)?{n}\b"]
+    else:
+        strict = [rf"\b(?:class|interface|enum|record|@interface)\s+{n}\b", rf"\b(?:public|protected)\b[^=;(]*\b{n}\s*\("]
+        loose = [rf"\b{n}\s*\(", rf"\b{n}\s*[;=,]", rf"^\s*{n}\b"]
+    return [re.compile(x) for x in strict + loose]
+
+
+def locate(symbol: str, language: str, files: Files, enclosing_only: bool = False) -> tuple[str, int] | None:
+    """(file, 1-based line) of an item's definition; with enclosing_only, of the type around it."""
+    scope, names = _names(symbol, language)
+    candidates = _candidate_files(files, symbol, language, scope)
+    for name in names[1:] if enclosing_only else names:
+        for pattern in _definition_patterns(name, language):
+            for rel in candidates:
+                for i, line in enumerate(files[rel].splitlines(), 1):
+                    if pattern.search(line):
+                        return rel, i
+    return None
+
+
 SURFACES: dict[str, Callable[[Files], dict[str, str]]] = {"go": go_surface, "rust": rust_surface, "java": java_surface}
 
 
@@ -460,12 +519,24 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
     roots = list(params.get("roots") or DEFAULT_ROOTS[language])
     ref = baseline or params.get("baseline", "HEAD")
     surface = SURFACES[language]
-    before = surface(baseline_files(repo_root, ref, language, roots))
-    after = surface(working_tree_files(repo_root, language, roots))
+    old_files = baseline_files(repo_root, ref, language, roots)
+    new_files = working_tree_files(repo_root, language, roots)
+    before, after = surface(old_files), surface(new_files)
     diff = diff_surfaces(before, after)
 
     def report(symbol: str, old: str | None, new: str | None) -> ViolationReport:
         evidence = {"symbol": symbol, "before": old, "after": new, "language": language, "baseline": ref}
+        # Point at the item in the working tree. A removed item points at the type around it (or
+        # at the new overload, when only its parameters changed),
+        # or, when there is none, at the top of the file it used to be in.
+        scope, names = _names(symbol, language)
+        still_named = new is None and any(_names(k, language)[0] == scope and _names(k, language)[1][:1] == names[:1] for k in after)
+        place = locate(symbol, language, new_files, enclosing_only=new is None and not still_named)
+        if place is None and new is None:
+            was = locate(symbol, language, old_files)
+            place = (was[0], 1) if was and was[0] in new_files else None
+        if place:
+            evidence["file"], evidence["line"] = place
         return ViolationReport.for_clause(clause, evidence)
 
     reports = [report(s, b, a) for s, (b, a) in diff.changed.items()]

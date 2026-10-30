@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from collections import Counter
@@ -30,7 +31,7 @@ from .ir import Clause, ClauseKind, Covenant, OnViolation
 from .locking import file_lock
 from .monitors.effects import EffectMonitor, normalize_path
 from .monitors.snapshot import CopySnapshotter
-from .monitors.trace import TraceMonitor
+from .monitors.trace import ATOMS, TraceMonitor
 from . import policy
 from .paths import claude_settings_files, default_state_dir
 from .verifiers import api_surface, dependency_diff, schema_guard, source_api, sqlite_guard, ts_api_surface
@@ -476,7 +477,19 @@ class Runtime:
             "last_passing_test": None if last_pass is None else self.trace[last_pass].ts.isoformat(),
             "edits_since_last_passing_test": edits,
         }
-        return ViolationReport.for_clause(clause, evidence)
+        formula = clause.params["formula"]
+        hints = None
+        counted = re.findall(r"#\s*([a-z_]+)", formula)
+        if counted:
+            since = self.trace[self.session.get("clause_start", {}).get(clause.id, 0):]
+            evidence["counts_so_far"] = {a: sum(1 for e in since if ATOMS[a](e)) for a in counted}
+            hints = [f"This task allows only a limited number of these actions ({formula}) and the limit is reached. "
+                     "Finish without it, or ask the human to raise the limit with `covenant amend`"]
+        elif "S[" in formula and "test" in formula:
+            cmd = clause.params.get("test_cmd")
+            hints = [f"Run the tests now{f' (`{cmd}`)' if cmd else ''}: edits must be followed by a test run "
+                     "within the number of steps this task allows"]
+        return ViolationReport.for_clause(clause, evidence, hints=hints)
 
     def _semantic_reports(self) -> list[ViolationReport]:
         reports = []
