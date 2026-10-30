@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from collections import Counter
 from collections.abc import Callable
@@ -32,7 +33,7 @@ from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import TraceMonitor
 from . import policy
 from .paths import claude_settings_files, default_state_dir
-from .verifiers import api_surface, dependency_diff, schema_guard, source_api, ts_api_surface
+from .verifiers import api_surface, dependency_diff, schema_guard, source_api, sqlite_guard, ts_api_surface
 from .verifiers.test_gate import run_tests
 
 SemanticVerifier = Callable[[Clause, Path, "str | None"], list[ViolationReport]]
@@ -76,8 +77,9 @@ class Decision:
 
 
 def is_resolved(report: ViolationReport) -> bool:
-    """An effect that was rolled back successfully no longer needs to block anything."""
-    return report.kind is ClauseKind.EFFECT_PROHIBITION and report.evidence.get("rolled_back") is True
+    """An effect (or lost database rows) rolled back successfully no longer needs to block anything."""
+    restorable = report.kind is ClauseKind.EFFECT_PROHIBITION or report.checker == "sqlite_guard"
+    return restorable and report.evidence.get("rolled_back") is True
 
 
 def _file_hash(path: Path) -> str:
@@ -129,6 +131,7 @@ class Runtime:
             EffectMonitor(c, self.repo_root) for c in covenant.enforced(ClauseKind.EFFECT_PROHIBITION)
         ]
         self.semantic_clauses = covenant.enforced(ClauseKind.SEMANTIC_INVARIANT)
+        self.sqlite_clauses = [c for c in self.semantic_clauses if c.checker == "sqlite_guard"]
 
     # ----- state -------------------------------------------------------------
 
@@ -163,10 +166,12 @@ class Runtime:
         self.session: dict[str, Any] = (
             json.loads(session_path.read_text(encoding="utf-8")) if session_path.exists() else {}
         )
-        for line in self._read_lines("trace.jsonl"):
+        starts = self.session.get("clause_start", {})  # rules added mid-task apply from then on
+        for n, line in enumerate(self._read_lines("trace.jsonl")):
             event = EVENT_ADAPTER.validate_json(line)
-            for _, monitor in self.trace_monitors:
-                monitor.step(event)
+            for clause, monitor in self.trace_monitors:
+                if n >= starts.get(clause.id, 0):
+                    monitor.step(event)
             self.trace.append(event)
         self.block_counts: Counter[str] = Counter()
         for line in self._read_lines("reports.jsonl"):
@@ -196,11 +201,14 @@ class Runtime:
                     baselines[clause.id] = self._git_rev_parse(ref)
             self.snapshotter = CopySnapshotter(self.state_dir, self.repo_root)
             files = self.snapshotter.take(self.effect_monitors)
+            shutil.rmtree(self.state_dir / "sqlite", ignore_errors=True)
+            databases = sum(sqlite_guard.Snapshot(self.state_dir, c).take(c, self.repo_root) for c in self.sqlite_clauses)
             self.session = {
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "repo": str(self.repo_root),
                 "baselines": baselines,
                 "snapshot_files": files,
+                "snapshot_databases": databases,
                 "integrity": {str(p): _file_hash(p) for p in self._integrity_files() + policy_files},
                 "sources": {str(p): _file_hash(p) for p in [self.covenant_path, *policy_files]},
                 "policy_files": [str(p) for p in policy_files],
@@ -208,6 +216,55 @@ class Runtime:
             }
             self._write_session()
             return self.session
+
+    def amend(self) -> list[str]:
+        """Approve new rules mid-task. They apply from now on; the trace, snapshots and
+        baselines of the rules already approved stay as they are.
+
+        Only additions are accepted: a changed or removed rule, or any other tampering
+        with Covenant's setup, needs `covenant start`, which a human runs.
+        """
+        with self._lock():
+            self._load_state()
+            if not self.session:
+                raise ValueError("no task in progress; run `covenant start` instead")
+            sources = set(self.session.get("sources", {}))
+            other = [r for r in self._integrity_reports() if r.evidence.get("path") not in sources]
+            if other:
+                raise ValueError("Covenant's setup was changed (" + "; ".join(
+                    f"{r.evidence['path']}: {r.evidence['problem']}" for r in other) + "); only `covenant start` can approve that")
+            old = {c.id: c for c in self.covenant.clauses}
+            merged, policy_files = policy.load(self.covenant_path)
+            new_ids = {c.id for c in merged.clauses}
+            touched = sorted([i for i in old if i not in new_ids] + [c.id for c in merged.clauses if c.id in old and c != old[c.id]])
+            if touched:
+                raise ValueError(f"amend only adds rules, but {', '.join(touched)} changed or disappeared; "
+                                 "run `covenant start` to re-approve from scratch")
+            added = [c for c in merged.clauses if c.id not in old]
+            if not added:
+                return []
+            self._configure(merged)
+            merged.dump(self.approved_path)
+            ids = {c.id for c in added}
+            starts = self.session.setdefault("clause_start", {})
+            baselines = self.session.setdefault("baselines", {})
+            for clause in added:
+                starts[clause.id] = len(self.trace)
+                ref = clause.params.get("baseline") if clause.kind is ClauseKind.SEMANTIC_INVARIANT else None
+                if ref:
+                    baselines[clause.id] = self._git_rev_parse(ref)
+            self.session["snapshot_files"] = self.session.get("snapshot_files", 0) + self.snapshotter.extend(
+                [m for m in self.effect_monitors if m.clause.id in ids])
+            self.session["snapshot_databases"] = self.session.get("snapshot_databases", 0) + sum(
+                sqlite_guard.Snapshot(self.state_dir, c).take(c, self.repo_root) for c in self.sqlite_clauses if c.id in ids)
+            self.session["integrity"] = {str(p): _file_hash(p) for p in self._integrity_files() + policy_files}
+            self.session["sources"] = {str(p): _file_hash(p) for p in [self.covenant_path, *policy_files]}
+            self.session["policy_files"] = [str(p) for p in policy_files]
+            self.session.setdefault("amendments", []).append(
+                {"at": datetime.now(timezone.utc).isoformat(), "clauses": sorted(ids), "trace_index": len(self.trace)})
+            self._write_session()
+            self._load_state()
+            return [c.id for c in added]
 
     def _write_session(self) -> None:
         (self.state_dir / "session.json").write_text(json.dumps(self.session, indent=2), encoding="utf-8")
@@ -249,6 +306,7 @@ class Runtime:
             self._load_state()
             reports = self._integrity_reports()
             reports += self._handle_effects(self.snapshotter.scan())
+            reports += self._sqlite_reports()
             own_effect_reports: list[ViolationReport] = []
             if isinstance(event, Effect):
                 own_effect_reports = self._handle_effects([event])
@@ -302,7 +360,7 @@ class Runtime:
         Used by editors, which check often and must not undo the human's own edits."""
         with self._lock():
             self._load_state()
-            reports = self._integrity_reports() + self._semantic_reports()
+            reports = self._integrity_reports() + self._semantic_reports() + self._sqlite_reports(apply=False)
             for effect in self.snapshotter.scan():
                 for monitor in self.effect_monitors:
                     if monitor.violates(effect):
@@ -324,6 +382,7 @@ class Runtime:
             reports = (
                 self._integrity_reports()
                 + self._handle_effects(self.snapshotter.scan())
+                + self._sqlite_reports()
                 + self._semantic_reports()
             )
             decision = Decision(f"check:{checkpoint}", not any(not is_resolved(r) for r in reports), reports)
@@ -392,6 +451,19 @@ class Runtime:
                 else:
                     self.snapshotter.acknowledge(effect.target)
                 reports.append(ViolationReport.for_clause(monitor.clause, evidence))
+        return reports
+
+    def _sqlite_reports(self, apply: bool = True) -> list[ViolationReport]:
+        """Row-level checks of protected SQLite databases; lost data is put back when apply is set."""
+        reports = []
+        for clause in self.sqlite_clauses:
+            try:
+                reports += sqlite_guard.check(
+                    clause, self.repo_root, self.state_dir, clause.on_violation is OnViolation.ROLLBACK, apply=apply)
+            except Exception as exc:  # fail closed
+                reports.append(ViolationReport.for_clause(
+                    clause, {"error": f"{type(exc).__name__}: {exc}"},
+                    hints=["The database check could not run; fix the setup or ask the human"]))
         return reports
 
     def _trace_report(self, clause: Clause, event: Event) -> ViolationReport:

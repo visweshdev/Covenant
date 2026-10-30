@@ -7,8 +7,10 @@ Two extractors share one output type:
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from .ground import RepoFacts
 from .schema import INTENT_HELP, CandidateClause, Extraction, Intent
@@ -51,6 +53,28 @@ def _anthropic() -> Any:
     return anthropic
 
 
+def endpoint_note(env: Any = None) -> str | None:
+    """A warning when the Anthropic SDK would send compile requests somewhere other than Anthropic.
+
+    Shells started by other tools (an agent CLI, a proxy setup) often export
+    ANTHROPIC_BASE_URL; the SDK follows it silently, and a proxy may not support the model
+    or the structured output Covenant asks for.
+    """
+    env = os.environ if env is None else env
+    if env.get("COVENANT_ANTHROPIC_BASE_URL"):
+        return None
+    url = env.get("ANTHROPIC_BASE_URL")
+    if not url:
+        return None
+    host = urlparse(url).hostname or url
+    if host == "anthropic.com" or host.endswith(".anthropic.com"):
+        return None
+    return (
+        f"ANTHROPIC_BASE_URL points at {host}, so the instruction is sent there, not to Anthropic. "
+        "Set COVENANT_ANTHROPIC_BASE_URL=https://api.anthropic.com to override it for Covenant only."
+    )
+
+
 class LLMExtractor:
     name = "claude"
 
@@ -62,7 +86,8 @@ class LLMExtractor:
     @property
     def client(self) -> Any:
         if self._client is None:
-            self._client = _anthropic().Anthropic()
+            base_url = os.environ.get("COVENANT_ANTHROPIC_BASE_URL")
+            self._client = _anthropic().Anthropic(**({"base_url": base_url} if base_url else {}))
         return self._client
 
     def __call__(self, instruction: str, facts: RepoFacts) -> Extraction:
@@ -158,7 +183,9 @@ class HeuristicExtractor:
                     filler.append(seg)
                 continue
             paths = [q for q in (p.rstrip(".,") for p in _PATHS.findall(seg)) if q and not re.fullmatch(r"[./]+", q)]
-            if intent is Intent.NO_DATA_LOSS and paths and not re.search(r"\b(data|records?|database)\b", seg, re.I):
+            only_databases = all(p.endswith((".db", ".sqlite", ".sqlite3")) for p in paths)
+            if (intent is Intent.NO_DATA_LOSS and paths and not only_databases
+                    and not re.search(r"\b(data|records?|database)\b", seg, re.I)):
                 intent = Intent.PROTECT_PATHS
             if intent is Intent.PROTECT_PATHS and not paths:
                 intent = Intent.OTHER

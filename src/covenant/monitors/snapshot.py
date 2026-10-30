@@ -68,6 +68,24 @@ class CopySnapshotter:
         self._save()
         return len(self.manifest)
 
+    def extend(self, monitors: Iterable[EffectMonitor]) -> int:
+        """Copy aside files that newly added rules protect, keeping the existing copies."""
+        (self.dir / "files").mkdir(parents=True, exist_ok=True)
+        added = 0
+        for path in self.protected_files(monitors):
+            target = normalize_path(str(path), self.repo_root)
+            if target in self.manifest:
+                continue
+            copy = self.dir / "files" / f"a{len(self.manifest)}"
+            shutil.copy2(path, copy)
+            self.manifest[target] = {
+                "path": str(path), "copy": str(copy), "sha256": _sha256(path),
+                "size": path.stat().st_size, "acknowledged": None,
+            }
+            added += 1
+        self._save()
+        return added
+
     def _current_state(self, entry: dict) -> str:
         path = Path(entry["path"])
         return _sha256(path) if path.is_file() else MISSING

@@ -24,7 +24,8 @@ covenant init                          # git hooks + Claude Code hooks, then sta
    - ask at most three questions about specific things in the repo;
    - check the result statically.
 
-   You approve the resulting `covenant.yaml`.
+   You approve the resulting `covenant.yaml`. To add a rule mid-task (`covenant amend "also don't
+   touch config/"`), the new rules apply from then on and the task's history is kept.
 2. **Enforce locally:** hooks turn what the agent does into events. Checkers judge them, and a
    violation goes back to the agent as a report naming the rule, the evidence and a fix.
 3. **Enforce in CI** (`covenant ci` / the GitHub Action): every pull request is judged against
@@ -39,6 +40,7 @@ covenant init                          # git hooks + Claude Code hooks, then sta
 | Semantic invariant | `source_api_diff` | Go, Rust and Java public API, read from source (no compiler needed) |
 | Semantic invariant | `schema_guard` | No dropped tables or columns, truncation, unqualified deletes or type changes in new migrations |
 | Semantic invariant | `dependency_diff` | Only allowed packages change; locked versions keep their major version |
+| Semantic invariant | `sqlite_guard` | Rows, tables and columns in SQLite databases are never lost; inserts are allowed. Checked after every step, and lost rows are put back from a snapshot |
 | Effect prohibition | `effect_monitor` | Protected files and tables aren't deleted, truncated or overwritten, whatever does it; rolled back from a snapshot |
 | Temporal obligation | `trace_monitor` | Ordering rules in past-time LTL, e.g. `G(commit -> (!edit S test_pass))` |
 
@@ -140,6 +142,7 @@ How the CI check judges a pull request:
 | `covenant compile "<instruction>"` | Writes `covenant.yaml`. Flags: `--offline`, `--unattended`, `--answer Q1=2`, `--dry-run`, `--yes` |
 | `covenant init` | Validates, installs git and Claude Code hooks, starts a session |
 | `covenant start` | Approves the current `covenant.yaml` and begins a task |
+| `covenant amend "<instruction>"` | Adds rules mid-task, keeping the history; only additions are accepted. Same flags as `compile` |
 | `covenant test` / `check` / `status` | Runs the declared tests / every check / shows the state |
 | `covenant ci` | Checks a pull request (`--base`, `--format github\|json\|text`, `--no-tests`) |
 | `covenant mcp` | Runs the MCP server |
@@ -148,6 +151,10 @@ How the CI check judges a pull request:
 | `covenant bench run` / `report` | Runs and scores CovenantBench (see `bench/README.md`) |
 
 Exit codes: 0 clean, 1 violations (the agent should revise), 2 needs a human, 3 bad setup.
+
+Compiling with Claude reads `ANTHROPIC_API_KEY`. If `ANTHROPIC_BASE_URL` points somewhere other
+than Anthropic (agent CLIs and proxies often export it), `compile` warns you; set
+`COVENANT_ANTHROPIC_BASE_URL=https://api.anthropic.com` to override it for Covenant only.
 
 ## Safety model
 
@@ -158,8 +165,8 @@ Exit codes: 0 clean, 1 violations (the agent should revise), 2 needs a human, 3 
 **Limits.** Covenant runs as your user. An agent with a shell could still edit its state folder
 directly. That gets detected, but it isn't prevented: full isolation needs the agent in a sandbox
 where that folder isn't writable. Effects are found by comparing hashes on every event, not by
-kernel events, and database effects are only seen through migrations, the diff, or an explicit
-`covenant record effect`.
+kernel events. SQLite databases are compared row by row; other databases are only seen through
+migrations, the diff, or an explicit `covenant record effect`.
 
 ## Development
 
@@ -190,8 +197,8 @@ These need tools this project's development machine doesn't have, so they couldn
   bind mount of the repo, the hook URL pointing at the host, and copy-on-write snapshots in
   place of the file copies. It needs Docker or WSL to build and test.
 - **Live database proxy:** see and roll back SQL against Postgres or MySQL as it runs. SQLite
-  files are already protected like any other file, and migrations are checked by `schema_guard`.
-  It needs a database server to test against.
+  databases are already guarded row by row (`sqlite_guard`), and migrations are checked by
+  `schema_guard`. It needs a database server to test against.
 - **A real-repo CovenantBench:** the harness, metrics and five synthetic tasks exist. The
   proposal's 60–200 tasks from real repos, using commits after the models' training cutoff and
   with annotated ground truth, are curation work.

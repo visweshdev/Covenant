@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from ..ir import Clause, ClauseKind, ClauseStatus, OnViolation
-from .ground import RepoFacts
+from .ground import DB_SUFFIXES, RepoFacts
 from .schema import CandidateClause, Intent
 
 TESTS_BEFORE = "G({action} -> (!edit S test_pass))"
@@ -81,18 +81,39 @@ class Binder:
             tables = facts.db_tables if intent is Intent.NO_DATA_LOSS else []
             if not paths and not tables:
                 return [self._unenforceable(c, ClauseKind.EFFECT_PROHIBITION, "no protected files, folders or tables could be found in the repo")]
-            deny = ["delete", "truncate", "overwrite"] + (["rename"] if intent is Intent.PROTECT_PATHS else [])
-            params: dict = {"deny": deny, "paths": paths}
-            if tables:
-                params["db_tables"] = tables
             source = "named in the instruction" if explicit else "found in the repo"
-            return [Clause(
-                id=self._id(), kind=ClauseKind.EFFECT_PROHIBITION, source_span=c.source_span,
-                scope=paths + [f"table {t}" for t in tables], checker="effect_monitor", params=params,
-                on_violation=OnViolation.ROLLBACK,
-                assumptions=[f"protected locations {source}: {', '.join(paths + tables)}"],
-                confidence=0.9 if explicit else 0.75,
-            )]
+            out = []
+            databases: list[str] = []
+            if intent is Intent.NO_DATA_LOSS:
+                # SQLite files are guarded row by row, so the agent's own inserts survive;
+                # protecting the whole file would roll those back too.
+                databases = [p for p in paths if p.endswith(DB_SUFFIXES)]
+                if not explicit:
+                    databases = list(dict.fromkeys(databases + facts.db_files))
+                paths = [p for p in paths if p not in databases]
+            deny = ["delete", "truncate", "overwrite"] + (["rename"] if intent is Intent.PROTECT_PATHS else [])
+            if paths or tables:
+                params: dict = {"deny": deny, "paths": paths}
+                if databases and paths:
+                    params["exclude"] = [f"{d}{s}" for d in databases for s in ("", "-journal", "-wal", "-shm")]
+                if tables:
+                    params["db_tables"] = tables
+                out.append(Clause(
+                    id=self._id(), kind=ClauseKind.EFFECT_PROHIBITION, source_span=c.source_span,
+                    scope=paths + [f"table {t}" for t in tables], checker="effect_monitor", params=params,
+                    on_violation=OnViolation.ROLLBACK,
+                    assumptions=[f"protected locations {source}: {', '.join(paths + tables)}"],
+                    confidence=0.9 if explicit else 0.75,
+                ))
+            if databases:
+                out.append(Clause(
+                    id=self._id(), kind=ClauseKind.SEMANTIC_INVARIANT, source_span=c.source_span,
+                    scope=[f"rows in {d}" for d in databases], checker="sqlite_guard",
+                    params={"databases": databases}, on_violation=OnViolation.ROLLBACK,
+                    assumptions=[f"SQLite databases {source}: {', '.join(databases)}; new rows are allowed"],
+                    confidence=0.9 if explicit else 0.75,
+                ))
+            return out
 
         if intent in (Intent.TESTS_BEFORE_COMMIT, Intent.TESTS_BEFORE_PUSH):
             action = "commit" if intent is Intent.TESTS_BEFORE_COMMIT else "push"

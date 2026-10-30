@@ -22,7 +22,7 @@ export async function run(): Promise<void> {
   assert.ok(api, "extension did not activate on a repo with covenant.yaml");
 
   const commands = await vscode.commands.getCommands(true);
-  for (const c of ["covenant.refresh", "covenant.compile", "covenant.approve", "covenant.runTests", "covenant.init"]) {
+  for (const c of ["covenant.refresh", "covenant.compile", "covenant.approve", "covenant.runTests", "covenant.init", "covenant.amend"]) {
     assert.ok(commands.includes(c), `command ${c} missing`);
   }
 

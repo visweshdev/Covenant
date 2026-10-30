@@ -44,6 +44,15 @@ def _parser() -> argparse.ArgumentParser:
     comp.add_argument("--yes", action="store_true", help="write the file without asking for approval")
     comp.add_argument("--dry-run", action="store_true", help="print the result without writing it")
     comp.add_argument("--format", choices=["text", "json"], default="text", help="json: machine-readable dry run (for editors)")
+    amend = sub.add_parser("amend", help="add rules to the Covenant mid-task, keeping the task's history")
+    amend.add_argument("instruction", help="the extra instruction, e.g. \"also don't touch config/\"")
+    amend.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
+    amend.add_argument("--model", default=None, help="Claude model for extraction (default: claude-opus-5-5)")
+    amend.add_argument("--answer", action="append", default=[], metavar="Q1=2", help="answer a question (1-based option)")
+    amend.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
+    amend.add_argument("--yes", action="store_true", help="add the rules without asking for approval")
+    amend.add_argument("--dry-run", action="store_true", help="print the new rules without adding them")
+    amend.set_defaults(format="text")
     init = sub.add_parser("init", help="set up a repo: validate, install git and Claude Code hooks, start")
     init.add_argument("--no-claude", action="store_true", help="skip the Claude Code hooks")
     init.add_argument("--no-git", action="store_true", help="skip the git hooks")
@@ -266,8 +275,65 @@ def _dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def _renumber(existing: list[str], clauses: list) -> list:
+    """Give new clauses ids that continue after the existing C<n> ones."""
+    import re
+
+    n = max((int(m.group(1)) for i in existing if (m := re.fullmatch(r"C(\d+)", i))), default=0)
+    out = []
+    for clause in clauses:
+        n += 1
+        out.append(clause.model_copy(update={"id": f"C{n}"}))
+    return out
+
+
+def _amend(args: argparse.Namespace, repo: Path, covenant_path: Path, result) -> int:
+    import yaml
+
+    try:
+        current = Covenant.load(covenant_path)
+        merged = policy.load(covenant_path)[0]
+    except (OSError, ValidationError, ValueError) as exc:
+        print(f"covenant: cannot load {covenant_path}: {exc}", file=sys.stderr)
+        return 3
+    new = _renumber([c.id for c in merged.clauses], result.covenant.clauses)
+    print("New rules:", file=sys.stderr)
+    print(yaml.safe_dump([c.model_dump(mode="json", exclude_defaults=True) for c in new], sort_keys=False), file=sys.stderr)
+    if args.dry_run:
+        return 3 if result.errors else 0
+    if result.errors:
+        print("covenant: fix the errors above before adding these rules.", file=sys.stderr)
+        return 3
+    if not new:
+        print("covenant: the instruction added no rules.", file=sys.stderr)
+        return 0
+    if not args.yes:
+        if not (sys.stdin.isatty() and not args.unattended):
+            print("covenant: pass --yes to add the rules without a prompt.", file=sys.stderr)
+            return 3
+        if input(f"Add {len(new)} rule(s) to {covenant_path.name}? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+            return 1
+    updated = current.model_copy(update={
+        "instruction": f"{current.instruction.rstrip()}\n{args.instruction}",
+        "clauses": current.clauses + new,
+    })
+    updated.dump(covenant_path)
+    runtime = Runtime.open(repo, covenant_path, args.state_dir)
+    if runtime is None or not runtime.has_session:
+        print(f"added {', '.join(c.id for c in new)} to {covenant_path}. Run `covenant start` to enforce them.", file=sys.stderr)
+        return 0
+    try:
+        added = runtime.amend()
+    except ValueError as exc:
+        current.dump(covenant_path)  # leave the file as approved
+        print(f"covenant: {exc}", file=sys.stderr)
+        return 3
+    print(f"added and approved {', '.join(added)}; they apply from now on, the rest of the task is unchanged.", file=sys.stderr)
+    return 0
+
+
 def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
-    from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor
+    from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor, endpoint_note
     from .compiler.pipeline import compile_instruction, render_summary
 
     answers: dict[str, int] = {}
@@ -293,11 +359,17 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
                 return int(reply) - 1
 
     extractor = HeuristicExtractor() if args.offline else LLMExtractor(**({"model": args.model} if args.model else {}))
+    note = None if args.offline else endpoint_note()
+    if note:
+        print(f"covenant: warning: {note}", file=sys.stderr)
     try:
         result = compile_instruction(args.instruction, repo, extractor, ask=ask if interactive else None, answers=answers)
     except CompileError as exc:
         print(f"covenant: {exc}", file=sys.stderr)
         return 3
+    if args.command == "amend":
+        print(render_summary(result), file=sys.stderr)
+        return _amend(args, repo, covenant_path, result)
     if args.format == "json":
         print(json.dumps(_compile_json(result), indent=2))
         if args.dry_run:
@@ -359,6 +431,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bench":
         return _bench(args)
     if args.command == "compile":
+        return _compile(args, repo, covenant_path)
+    if args.command == "amend":
+        if not covenant_path.exists():
+            print(f'covenant: no {covenant_path.name} to amend; create one with `covenant compile "<your instruction>"`', file=sys.stderr)
+            return 3
         return _compile(args, repo, covenant_path)
     if args.command == "ci":
         return _ci(args, repo, covenant_path)

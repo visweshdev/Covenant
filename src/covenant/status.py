@@ -12,7 +12,7 @@ def status_json(runtime: Runtime) -> dict:
         "covenant_path": str(runtime.covenant_path),
         "state_dir": str(runtime.state_dir),
         "has_session": runtime.has_session,
-        "session": {k: runtime.session.get(k) for k in ("started_at", "baselines", "claude_session_id")},
+        "session": {k: runtime.session.get(k) for k in ("started_at", "baselines", "claude_session_id", "amendments")},
         "repo_covenant_changed": runtime.repo_covenant_changed(),
         "clauses": [c.model_dump(mode="json") for c in runtime.covenant.clauses],
         "protected": [

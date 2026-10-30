@@ -54,6 +54,12 @@ REGISTRY: dict[str, CheckerSpec] = {
             "Go, Rust or Java public API unchanged versus a baseline commit (read from source)",
         ),
         CheckerSpec(
+            "sqlite_guard",
+            ClauseKind.SEMANTIC_INVARIANT,
+            "Rows, tables and columns in SQLite databases are never lost; inserts are allowed",
+            ("databases",),
+        ),
+        CheckerSpec(
             "ts_api_surface_diff",
             ClauseKind.SEMANTIC_INVARIANT,
             "TypeScript exported names and types unchanged versus a baseline commit",

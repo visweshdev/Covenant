@@ -193,3 +193,41 @@ def test_cli_compile_then_init(mylib_repo, tmp_path):
     assert len(cov.enforced()) == 3
     r = subprocess.run(base + ["init", "--no-claude"], capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
+
+
+def test_user_data_in_sqlite_is_guarded_row_by_row(tmp_path):
+    import sqlite3
+    from contextlib import closing
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "uploads.txt").write_text("x")
+    with closing(sqlite3.connect(tmp_path / "data" / "app.db")) as db:
+        db.execute("CREATE TABLE t (x)")
+    (tmp_path / "data" / "notes.db").write_text("not sqlite at all")
+    facts = ground(tmp_path)
+    assert facts.db_files == ["data/app.db"]
+
+    result = compile_instruction("Add a signup endpoint, but don't delete user data", tmp_path, HeuristicExtractor())
+    by_checker = {c.checker: c for c in result.covenant.clauses}
+    assert by_checker["sqlite_guard"].params == {"databases": ["data/app.db"]}
+    assert by_checker["sqlite_guard"].on_violation.value == "rollback"
+    effect = by_checker["effect_monitor"]
+    assert effect.params["paths"] == ["data/**"]
+    assert "data/app.db" in effect.params["exclude"] and "data/app.db-journal" in effect.params["exclude"]
+    assert not [i for i in result.issues if i.level == "error"]
+
+
+def test_explicit_database_path_only(tmp_path):
+    result = compile_instruction("Fix the login bug. Don't delete anything in app.db", tmp_path, HeuristicExtractor())
+    [clause] = [c for c in result.covenant.clauses if c.checker]
+    assert clause.checker == "sqlite_guard" and clause.params["databases"] == ["app.db"]
+
+
+def test_endpoint_note():
+    from covenant.compiler.extract import endpoint_note
+
+    assert endpoint_note({}) is None
+    assert endpoint_note({"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}) is None
+    note = endpoint_note({"ANTHROPIC_BASE_URL": "https://openrouter.ai/api"})
+    assert "openrouter.ai" in note and "COVENANT_ANTHROPIC_BASE_URL" in note
+    assert endpoint_note({"ANTHROPIC_BASE_URL": "https://openrouter.ai/api", "COVENANT_ANTHROPIC_BASE_URL": "https://api.anthropic.com"}) is None

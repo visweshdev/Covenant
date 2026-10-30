@@ -69,6 +69,11 @@
         "title": "Covenant: Compile Rules from Instruction"
       },
       {
+        "command": "covenant.amend",
+        "title": "Covenant: Add a Rule to the Current Task",
+        "icon": "$(add)"
+      },
+      {
         "command": "covenant.init",
         "title": "Covenant: Set Up This Repo (Hooks + Start)"
       },
@@ -101,6 +106,11 @@
           "command": "covenant.approve",
           "when": "view == covenant.rules",
           "group": "navigation@3"
+        },
+        {
+          "command": "covenant.amend",
+          "when": "view == covenant.rules",
+          "group": "navigation@4"
         }
       ],
       "commandPalette": [

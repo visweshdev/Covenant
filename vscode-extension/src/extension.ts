@@ -300,6 +300,46 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   await ctrl.refresh();
 }
 
+async function amendCommand(ctrl: Controller): Promise<void> {
+  if (!fs.existsSync(ctrl.covenantPath)) {
+    void vscode.window.showWarningMessage("There's no covenant.yaml yet; compile one first.", "Compile").then(
+      (c) => c && vscode.commands.executeCommand("covenant.compile"),
+    );
+    return;
+  }
+  const instruction = await vscode.window.showInputBox({
+    title: "Covenant: add a rule to the current task",
+    prompt: "An extra instruction; the rules it adds apply from now on",
+    placeHolder: "Also don't touch config/",
+    ignoreFocusOut: true,
+  });
+  if (!instruction) return;
+  const base = ["amend", instruction, "--unattended", ...(config("offlineCompile", false) ? ["--offline"] : [])];
+  const draft = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" },
+    () => ctrl.cli.run([...base, "--dry-run"], 900_000),
+  );
+  output.append(draft.stderr);
+  if (draft.code !== 0) {
+    void vscode.window.showErrorMessage("Covenant couldn't compile that instruction; see the Covenant output.");
+    output.show();
+    return;
+  }
+  const rules = draft.stderr.slice(draft.stderr.indexOf("New rules:"));
+  const choice = await vscode.window.showInformationMessage(
+    "Add these rules to covenant.yaml and approve them?",
+    { modal: true, detail: rules },
+    "Add",
+  );
+  if (choice !== "Add") return;
+  const code = await ctrl.runLogged("Covenant: adding rules…", [...base, "--yes"]);
+  if (code !== 0) {
+    void vscode.window.showErrorMessage("Covenant couldn't add the rules; see the Covenant output.");
+    output.show();
+  }
+  await ctrl.refresh();
+}
+
 /** What `activate` returns: read-only state, for tests and other extensions. */
 export interface CovenantApi {
   refresh(): Promise<void>;
@@ -320,6 +360,7 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
     vscode.commands.registerCommand("covenant.openRule", (id: string) => ctrl.openRule(id)),
     vscode.commands.registerCommand("covenant.openViolation", (r: Report) => ctrl.openViolation(r)),
     vscode.commands.registerCommand("covenant.compile", () => compileCommand(ctrl)),
+    vscode.commands.registerCommand("covenant.amend", () => amendCommand(ctrl)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
     vscode.commands.registerCommand("covenant.runTests", async () => {
       const code = await ctrl.runLogged("Covenant: running tests…", ["test"]);

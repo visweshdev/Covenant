@@ -39,6 +39,7 @@ class RepoFacts:
     ts_entries: list[str] = field(default_factory=list)
     data_paths: list[str] = field(default_factory=list)
     db_tables: list[str] = field(default_factory=list)
+    db_files: list[str] = field(default_factory=list)  # SQLite files, guarded row by row
     source_language: str | None = None  # go, rust or java, checked from source
     test_commands: list[tuple[str, str]] = field(default_factory=list)  # (command, where it was found)
     migration_dirs: list[str] = field(default_factory=list)
@@ -52,6 +53,7 @@ class RepoFacts:
             lines.append(f"- {self.source_language.capitalize()} project (public API read from source)")
         lines.append(f"- User data locations: {', '.join(self.data_paths) or 'none found'}")
         lines.append(f"- Database tables: {', '.join(self.db_tables) or 'none found'}")
+        lines.append(f"- SQLite files: {', '.join(self.db_files) or 'none found'}")
         tests = "; ".join(f"`{c}` (from {s})" for c, s in self.test_commands) or "none found"
         lines.append(f"- Test commands: {tests}")
         lines.append(f"- Migration folders: {', '.join(self.migration_dirs) or 'none'}")
@@ -101,6 +103,25 @@ def find_data_paths(root: Path, packages: list[PythonPackage]) -> list[str]:
         if home.is_dir():
             paths.append(f"~/.{pkg.name}/**")
     return paths
+
+
+def is_sqlite(path: Path) -> bool:
+    try:
+        with path.open("rb") as f:
+            head = f.read(16)
+    except OSError:
+        return False
+    return head in (b"", b"SQLite format 3\x00")
+
+
+def find_db_files(root: Path) -> list[str]:
+    found = []
+    for dirpath, filenames in _walk(root, max_depth=3):
+        for name in filenames:
+            path = dirpath / name
+            if name.endswith(DB_SUFFIXES) and is_sqlite(path):
+                found.append(path.relative_to(root).as_posix())
+    return sorted(found)
 
 
 def find_db_tables(root: Path) -> list[str]:
@@ -175,6 +196,7 @@ def ground(root: Path) -> RepoFacts:
         source_language=source_api.detect_language(root),
         data_paths=find_data_paths(root, packages),
         db_tables=find_db_tables(root),
+        db_files=find_db_files(root),
         test_commands=find_test_commands(root),
         migration_dirs=[d for d in MIGRATION_DIRS if (root / d).is_dir()],
     )

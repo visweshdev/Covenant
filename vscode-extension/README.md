@@ -24,6 +24,7 @@ Saving never changes anything. The editor's check runs `covenant check --preview
 |---|---|
 | Covenant: Compile Rules from Instruction | Drafts `covenant.yaml` from a plain-English instruction, asks up to three questions, and shows the draft before writing it |
 | Covenant: Set Up This Repo | `covenant init`: git hooks, Claude Code hooks, start enforcing |
+| Covenant: Add a Rule to the Current Task | `covenant amend`: compiles an extra instruction, shows the new rules, and approves them without resetting the task |
 | Covenant: Approve Rules and Start Task | Pins the current `covenant.yaml` and baseline commit and starts a fresh task |
 | Covenant: Run Tests | Runs the declared test command so a commit can follow |
 | Covenant: Check Now | Re-checks immediately |
