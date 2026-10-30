@@ -48,6 +48,7 @@ class Clause(_Model):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     assumptions: list[str] = Field(default_factory=list)
     status: ClauseStatus = ClauseStatus.ENFORCED
+    origin: str | None = Field(default=None, description="The team policy this clause came from, if any.")
 
     @model_validator(mode="after")
     def _enforced_needs_checker(self) -> Clause:
@@ -65,6 +66,7 @@ class Covenant(_Model):
     instruction: str
     goal: Goal
     clauses: list[Clause]
+    extends: list[str] = Field(default_factory=list, description="Team policy files whose rules apply too.")
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Covenant:

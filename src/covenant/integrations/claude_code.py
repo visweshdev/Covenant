@@ -80,6 +80,7 @@ class ClaudeCodeHook:
     def __init__(self, runtime: Runtime):
         self.rt = runtime
         self.controls = control_paths(runtime.repo_root, runtime.covenant_path, runtime.state_dir)
+        self.controls += [Path(p) for p in runtime.session.get("policy_files", [])]  # team policies too
 
     # ----- dispatch ----------------------------------------------------------
 

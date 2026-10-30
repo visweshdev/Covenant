@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from .events import Commit, Edit, Effect, Push, Run
 from .integrations import claude_code
+from . import policy
 from .ir import Covenant
 from .paths import default_state_dir
 from .runtime import Decision, Runtime
@@ -253,6 +254,11 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
             return 3
         if input(f"\nWrite {covenant_path}? [Y/n] ").strip().lower() not in ("", "y", "yes"):
             return 1
+    if covenant_path.exists():  # keep the team policies the repo already uses
+        try:
+            result.covenant.extends = Covenant.load(covenant_path).extends
+        except (OSError, ValidationError, ValueError):
+            pass
     result.covenant.dump(covenant_path)
     print(f"wrote {covenant_path}. Next: `covenant init` to install hooks and start enforcing.", file=sys.stderr)
     return 0
@@ -283,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         return _ci(args, repo, covenant_path)
 
     try:
-        covenant = Covenant.load(covenant_path)
+        covenant = policy.load(covenant_path)[0]
     except (OSError, ValidationError, ValueError) as exc:
         print(f"covenant: cannot load {covenant_path}: {exc}", file=sys.stderr)
         if not covenant_path.exists():

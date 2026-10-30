@@ -16,8 +16,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import posixpath
+
 import yaml
 
+from . import policy
 from .feedback import ViolationReport
 from .ir import ClauseKind, Covenant, OnViolation
 from .monitors.effects import EffectMonitor
@@ -58,20 +61,30 @@ def resolve_base(repo: Path, base: str | None) -> str:
 
 
 def load_base_covenant(repo: Path, covenant_path: Path, base: str) -> tuple[Covenant, str, list[str], bool]:
+    """The Covenant as of the base commit, with team policies (also as of base) merged in."""
     rel = covenant_path.resolve().relative_to(repo.resolve()).as_posix()
     notes = []
     shown = _git(repo, "show", f"{base}:{rel}")
-    if shown.returncode == 0:
-        data = yaml.safe_load(shown.stdout)
-        if isinstance(data, dict) and list(data) == ["covenant"]:
-            data = data["covenant"]
-        covenant = Covenant.model_validate(data)
-        changed = _git(repo, "diff", "--quiet", base, "HEAD", "--", rel).returncode != 0
-        if changed:
-            notes.append(f"This PR changes {rel}. It was judged by the base version; the change needs human review.")
-        return covenant, f"{rel} at {base[:12]}", notes, changed
-    notes.append(f"{rel} does not exist at the base commit; using the PR's copy, which the PR itself could have weakened.")
-    return Covenant.load(covenant_path), f"{rel} (from the PR)", notes, False
+    if shown.returncode != 0:
+        notes.append(f"{rel} does not exist at the base commit; using the PR's copy, which the PR itself could have weakened.")
+        merged, _ = policy.load(covenant_path)
+        return merged, f"{rel} (from the PR)", notes, False
+
+    def read_at_base(path: str) -> str | None:
+        if Path(path).is_absolute():  # a machine-wide policy outside the repo
+            return policy.disk_reader(path)
+        result = _git(repo, "show", f"{base}:{path}")
+        return result.stdout if result.returncode == 0 else None
+
+    data = yaml.safe_load(shown.stdout)
+    if isinstance(data, dict) and list(data) == ["covenant"]:
+        data = data["covenant"]
+    covenant, used = policy.resolve(Covenant.model_validate(data), read_at_base, posixpath.dirname(rel))
+    governed = [rel] + [p for p in used if not Path(p).is_absolute()]
+    changed = [p for p in governed if _git(repo, "diff", "--quiet", base, "HEAD", "--", p).returncode != 0]
+    for path in changed:
+        notes.append(f"This PR changes {path}. It was judged by the base version; the change needs human review.")
+    return covenant, f"{rel} at {base[:12]}", notes, bool(changed)
 
 
 def changed_files(repo: Path, base: str) -> list[tuple[str, str]]:

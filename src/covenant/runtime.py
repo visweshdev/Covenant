@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import subprocess
 from collections import Counter
 from collections.abc import Callable
@@ -31,6 +30,7 @@ from .locking import file_lock
 from .monitors.effects import EffectMonitor, normalize_path
 from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import TraceMonitor
+from . import policy
 from .paths import claude_settings_files, default_state_dir
 from .verifiers import api_surface, dependency_diff, schema_guard, ts_api_surface
 from .verifiers.test_gate import run_tests
@@ -117,7 +117,7 @@ class Runtime:
         if pinned and approved.exists():
             covenant = Covenant.load(approved)
         elif cov_path.exists():
-            covenant = Covenant.load(cov_path)
+            covenant = policy.load(cov_path)[0]
         else:
             return None
         return cls(covenant, repo, sdir, covenant_path=cov_path, **kwargs)
@@ -179,9 +179,11 @@ class Runtime:
         """Begin a task: approve the Covenant file, reset the trace, snapshot data, pin baselines."""
         with self._lock():
             self.state_dir.mkdir(parents=True, exist_ok=True)
+            policy_files: list[Path] = []
             if self.covenant_path.exists():
-                self._configure(Covenant.load(self.covenant_path))
-                shutil.copyfile(self.covenant_path, self.approved_path)
+                merged, policy_files = policy.load(self.covenant_path)
+                self._configure(merged)
+                merged.dump(self.approved_path)  # team policies merged in; edits to the sources don't count
             for name in ("trace.jsonl", "reports.jsonl"):
                 (self.state_dir / name).unlink(missing_ok=True)
             self._fresh_monitors()
@@ -198,7 +200,9 @@ class Runtime:
                 "repo": str(self.repo_root),
                 "baselines": baselines,
                 "snapshot_files": files,
-                "integrity": {str(p): _file_hash(p) for p in self._integrity_files()},
+                "integrity": {str(p): _file_hash(p) for p in self._integrity_files() + policy_files},
+                "sources": {str(p): _file_hash(p) for p in [self.covenant_path, *policy_files]},
+                "policy_files": [str(p) for p in policy_files],
                 **(extra or {}),
             }
             self._write_session()
@@ -214,8 +218,13 @@ class Runtime:
             self._write_session()
 
     def repo_covenant_changed(self) -> bool:
-        """True when the repo's Covenant file differs from the approved copy."""
-        return self.approved_path.exists() and _file_hash(self.covenant_path) != _file_hash(self.approved_path)
+        """True when covenant.yaml or a policy it uses changed since approval."""
+        if not self.approved_path.exists():
+            return False
+        sources = self.session.get("sources")
+        if not sources:
+            return _file_hash(self.covenant_path) != _file_hash(self.approved_path)
+        return any(_file_hash(Path(path)) != digest for path, digest in sources.items())
 
     def _git_rev_parse(self, ref: str) -> str:
         result = subprocess.run(
