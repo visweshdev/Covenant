@@ -73,6 +73,13 @@ command = "covenant"
 args = ["--repo", "/path/to/repo", "mcp"]
 ```
 
+## VS Code
+
+`vscode-extension/` adds a Covenant panel, the current violations in Problems, a 🔒 badge on
+protected files, and commands to compile rules, approve them and run tests. It updates live as
+an agent's hooks record events. Its checks never change files. Build it with `npm run package`
+and install the `.vsix` (see `vscode-extension/README.md`).
+
 ## CI
 
 ```yaml
@@ -136,5 +143,5 @@ from the proposal is in `examples/mylib`.
   Today the snapshot copies files aside and detects changes by hash.
 - **Database proxy:** to see and roll back live SQL.
 - **API checkers for Go, Java and Rust.**
-- **VS Code extension, web dashboard and team-wide policies.**
+- **Web dashboard and team-wide policies.**
 - **CovenantBench:** the evaluation suite from the proposal.

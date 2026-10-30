@@ -64,3 +64,18 @@ def test_committing_only_setup_files_needs_no_tests(mylib_repo, tmp_path):
     (mylib_repo / "notes.txt").write_text("x\n")
     git(mylib_repo, "add", "notes.txt")
     assert git(mylib_repo, "commit", "-qm", "work").returncode != 0  # ordinary commits still need tests
+
+
+def test_status_and_compile_json(mylib_repo, tmp_path):
+    state = tmp_path / "state"
+    assert cli(mylib_repo, state, "start").returncode == 0
+    r = cli(mylib_repo, state, "status", "--format", "json")
+    data = json.loads(r.stdout)
+    assert [c["id"] for c in data["clauses"]] == ["C1", "C2", "C3"]
+    assert data["protected"][0]["paths"][0] == "data/**"
+    assert data["test_commands"] == ["python -m pytest -q"] and data["has_session"]
+    r = cli(mylib_repo, state, "check", "--preview")
+    assert r.returncode == 1 and json.loads(r.stdout)["reports"][0]["violation"] == "C3"
+    r = cli(mylib_repo, state, "compile", "Fix the bug, but don't delete user data", "--offline", "--dry-run", "--format", "json")
+    out = json.loads(r.stdout)
+    assert out["covenant"]["clauses"][0]["checker"] == "effect_monitor" and "covenant:" in out["yaml"]

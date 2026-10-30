@@ -136,3 +136,18 @@ def test_additive_api_change_is_allowed(mylib_repo, tmp_path):
     core = mylib_repo / "mylib" / "core.py"
     core.write_text(core.read_text().replace(OLD_SIG, "def parse(text: str, strict: bool = False, *, mode: str = 'lenient') -> Doc:"))
     assert [r for r in rt.check().reports if r.violation == "C1"] == []
+
+
+def test_preview_has_no_side_effects(mylib_repo, tmp_path):
+    rt = runtime(mylib_repo, tmp_path)
+    users = mylib_repo / "data" / "users.json"
+    rt.record(Edit(path="mylib/core.py"))
+    users.write_text("[]")  # then the human edits protected data in their editor
+    log = tmp_path / "state" / "reports.jsonl"
+    reports_before = log.read_text() if log.exists() else ""
+    preview = rt.preview()
+    assert {r.violation for r in preview.reports} == {"C2", "C3"}
+    assert next(r for r in preview.reports if r.violation == "C2").evidence["pending"] is True
+    assert users.read_text() == "[]"  # not rolled back
+    assert (log.read_text() if log.exists() else "") == reports_before  # nothing logged
+    assert rt.block_counts == Runtime.open(mylib_repo, state_dir=tmp_path / "state").block_counts

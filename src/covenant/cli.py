@@ -41,15 +41,19 @@ def _parser() -> argparse.ArgumentParser:
     comp.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
     comp.add_argument("--yes", action="store_true", help="write the file without asking for approval")
     comp.add_argument("--dry-run", action="store_true", help="print the result without writing it")
+    comp.add_argument("--format", choices=["text", "json"], default="text", help="json: machine-readable dry run (for editors)")
     init = sub.add_parser("init", help="set up a repo: validate, install git and Claude Code hooks, start")
     init.add_argument("--no-claude", action="store_true", help="skip the Claude Code hooks")
     init.add_argument("--no-git", action="store_true", help="skip the git hooks")
     init.add_argument("--local", action="store_true", help="write Claude hooks to .claude/settings.local.json")
     sub.add_parser("validate", help="check the Covenant file statically")
     sub.add_parser("start", help="approve the Covenant file and begin a task")
-    sub.add_parser("status", help="show clauses and the current trace")
+    status = sub.add_parser("status", help="show clauses and the current trace")
+    status.add_argument("--format", choices=["text", "json"], default="text")
     sub.add_parser("test", help="run the declared test command and record the result")
-    sub.add_parser("check", help="run every check now")
+    check = sub.add_parser("check", help="run every check now")
+    check.add_argument("--preview", action="store_true",
+                       help="report what a commit would face, with no side effects (no rollback, no logging)")
     sub.add_parser("install-hooks", help="install git pre-commit and pre-push hooks")
     claude = sub.add_parser("install-claude", help="install Claude Code hooks")
     claude.add_argument("--local", action="store_true", help="write to .claude/settings.local.json")
@@ -153,6 +157,45 @@ def _ci(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
     return 1 if result.failed else 0
 
 
+def _status_json(runtime: Runtime) -> dict:
+    return {
+        "repo": str(runtime.repo_root),
+        "covenant_path": str(runtime.covenant_path),
+        "state_dir": str(runtime.state_dir),
+        "has_session": runtime.has_session,
+        "session": {k: runtime.session.get(k) for k in ("started_at", "baselines", "claude_session_id")},
+        "repo_covenant_changed": runtime.repo_covenant_changed(),
+        "clauses": [c.model_dump(mode="json") for c in runtime.covenant.clauses],
+        "protected": [
+            {"clause": m.clause.id, "paths": m.path_patterns, "exclude": m.exclude_patterns}
+            for m in runtime.effect_monitors
+        ],
+        "test_commands": runtime.test_commands,
+        "trace_length": len(runtime.trace),
+        "last_events": [e.model_dump(mode="json") for e in runtime.trace[-10:]],
+        "block_counts": dict(runtime.block_counts),
+        "escalate_after": runtime.escalate_after,
+        "recent_reports": runtime.recent_reports(),
+    }
+
+
+def _compile_json(result) -> dict:
+    import yaml
+
+    def question(q, chosen: int, how: str) -> dict:
+        return {"id": q.id, "clause": q.clause_id, "text": q.text, "options": [o.label for o in q.options],
+                "default": q.default, "chosen": chosen, "how": how}
+
+    return {
+        "covenant": result.covenant.model_dump(mode="json", exclude_defaults=True),
+        "yaml": yaml.safe_dump({"covenant": result.covenant.model_dump(mode="json", exclude_defaults=True)}, sort_keys=False),
+        "questions": [question(q, c, "answered") for q, c in result.asked]
+        + [question(q, q.default, "default") for q in result.defaulted],
+        "issues": [{"clause": i.clause_id, "level": i.level, "message": i.message} for i in result.issues],
+        "facts": result.facts.summary(),
+    }
+
+
 def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
     from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor
     from .compiler.pipeline import compile_instruction, render_summary
@@ -185,11 +228,16 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
     except CompileError as exc:
         print(f"covenant: {exc}", file=sys.stderr)
         return 3
-    print(render_summary(result), file=sys.stderr)
-    if result.defaulted:
+    if args.format == "json":
+        print(json.dumps(_compile_json(result), indent=2))
+        if args.dry_run:
+            return 3 if result.errors else 0
+    else:
+        print(render_summary(result), file=sys.stderr)
+    if result.defaulted and args.format != "json":
         print(f"\n{len(result.defaulted)} lower-impact question(s) took the conservative default (see 'assumes').", file=sys.stderr)
     if args.dry_run:
-        print(Path(covenant_path).name + ":", file=sys.stderr)
+        print(covenant_path.name + ":", file=sys.stderr)
         import yaml
 
         print(yaml.safe_dump({"covenant": result.covenant.model_dump(mode="json", exclude_defaults=True)}, sort_keys=False))
@@ -278,6 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "start":
             print(json.dumps(runtime.start(), indent=2))
             return 0
+        if args.command == "status" and args.format == "json":
+            print(json.dumps(_status_json(runtime), indent=2))
+            return 0
         if args.command == "status":
             for c in runtime.covenant.clauses:
                 print(f"{c.id} {c.kind.value} [{c.status.value}] {c.checker}: {c.source_span!r}")
@@ -293,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
                 code = max(code, _emit(decision))
             return code
         if args.command == "check":
-            return _emit(runtime.check())
+            return _emit(runtime.preview() if args.preview else runtime.check())
         if args.command == "hook":  # git shows hook output to the agent: stay quiet when clean
             if args.name == "pre-commit" and _only_setup_staged(repo, covenant_path):
                 # Committing Covenant's own setup (rules, hook config) is the human's job and the

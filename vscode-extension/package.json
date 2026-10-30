@@ -1,0 +1,150 @@
+{
+  "name": "covenant",
+  "displayName": "Covenant",
+  "description": "See and manage the rules Covenant enforces on coding agents: live violations, protected files, approvals.",
+  "version": "0.1.0",
+  "publisher": "covenant",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "policy",
+    "guardrails"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "workspaceContains:covenant.yaml",
+    "onView:covenant.rules"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "covenant",
+          "title": "Covenant",
+          "icon": "media/shield.svg"
+        }
+      ]
+    },
+    "views": {
+      "covenant": [
+        {
+          "id": "covenant.rules",
+          "name": "Rules"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "covenant.rules",
+        "contents": "No covenant.yaml in this workspace.\n[Compile rules from an instruction](command:covenant.compile)",
+        "when": "!covenant.hasCovenant"
+      }
+    ],
+    "commands": [
+      {
+        "command": "covenant.refresh",
+        "title": "Covenant: Check Now",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "covenant.runTests",
+        "title": "Covenant: Run Tests",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "covenant.approve",
+        "title": "Covenant: Approve Rules and Start Task",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "covenant.compile",
+        "title": "Covenant: Compile Rules from Instruction"
+      },
+      {
+        "command": "covenant.init",
+        "title": "Covenant: Set Up This Repo (Hooks + Start)"
+      },
+      {
+        "command": "covenant.openRule",
+        "title": "Covenant: Open Rule"
+      },
+      {
+        "command": "covenant.showLog",
+        "title": "Covenant: Show Activity Log"
+      },
+      {
+        "command": "covenant.openViolation",
+        "title": "Covenant: Show Violation"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "covenant.refresh",
+          "when": "view == covenant.rules",
+          "group": "navigation@1"
+        },
+        {
+          "command": "covenant.runTests",
+          "when": "view == covenant.rules",
+          "group": "navigation@2"
+        },
+        {
+          "command": "covenant.approve",
+          "when": "view == covenant.rules",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "covenant.openRule",
+          "when": "false"
+        },
+        {
+          "command": "covenant.openViolation",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Covenant",
+      "properties": {
+        "covenant.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python that has Covenant installed (runs `python -m covenant`)."
+        },
+        "covenant.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-check the rules when a file is saved. The check never changes files."
+        },
+        "covenant.offlineCompile": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compile instructions with the offline extractor instead of Claude."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test": "tsc -p . && node --test \"out/test/*.test.js\"",
+    "package": "tsc -p . && vsce package --skip-license --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/vscode": "1.100.0",
+    "@vscode/vsce": "3.2.1",
+    "typescript": "5.6.3"
+  }
+}

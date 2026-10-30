@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .events import EVENT_ADAPTER, GATED_EVENTS, Effect, Event, TestRun
+from .events import EVENT_ADAPTER, GATED_EVENTS, Commit, Effect, Event, TestRun
 from .feedback import ViolationReport
 from .ir import Clause, ClauseKind, Covenant, OnViolation
 from .locking import file_lock
@@ -285,6 +285,27 @@ class Runtime:
             for m in self.effect_monitors
             if m.violates(effect)
         ]
+
+    def preview(self) -> Decision:
+        """What a commit would face right now, with no side effects: nothing is logged, nothing
+        counts toward escalation, and changed protected files are reported, not rolled back.
+        Used by editors, which check often and must not undo the human's own edits."""
+        with self._lock():
+            self._load_state()
+            reports = self._integrity_reports() + self._semantic_reports()
+            for effect in self.snapshotter.scan():
+                for monitor in self.effect_monitors:
+                    if monitor.violates(effect):
+                        evidence = {"op": effect.op, "target": effect.target, "channel": effect.channel, "pending": True}
+                        reports.append(ViolationReport.for_clause(monitor.clause, evidence))
+            for clause, monitor in self.trace_monitors:
+                ok, _ = monitor.peek(Commit())
+                if not ok:
+                    reports.append(self._trace_report(clause, Commit()))
+            return Decision("preview", not reports, reports)
+
+    def recent_reports(self, limit: int = 30) -> list[dict[str, Any]]:
+        return [json.loads(line) for line in self._read_lines("reports.jsonl")[-limit:]]
 
     def check(self, checkpoint: str = "manual") -> Decision:
         """Run every check now without adding an event. Used at task end, and by the agent early."""
