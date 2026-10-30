@@ -64,7 +64,16 @@ class Binder:
                     params={"language": "typescript", "entries": facts.ts_entries, "baseline": "HEAD", "allow_additive": True},
                     assumptions=[f"public = exports of {', '.join(facts.ts_entries)}"], confidence=0.85,
                 ))
-            return out or [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, "no Python package or TypeScript entry found to check")]
+            if facts.source_language:
+                lang = facts.source_language
+                out.append(Clause(
+                    id=self._id(), kind=ClauseKind.SEMANTIC_INVARIANT, source_span=c.source_span,
+                    scope=[f"public {lang.capitalize()} API"], checker="source_api_diff",
+                    params={"language": lang, "baseline": "HEAD", "allow_additive": True},
+                    assumptions=[f"public = {'exported (capitalized) names outside internal/' if lang == 'go' else 'pub items' if lang == 'rust' else 'public and protected members'}"],
+                    confidence=0.75,
+                ))
+            return out or [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, "no package, entry file or Go/Rust/Java project found to check")]
 
         if intent in (Intent.NO_DATA_LOSS, Intent.PROTECT_PATHS):
             explicit = [_as_glob(p) for p in c.paths if "/" in p or "." in p]

@@ -12,7 +12,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..verifiers import ts_api_surface
+from ..verifiers import source_api, ts_api_surface
 
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", ".tox", ".mypy_cache",
              ".pytest_cache", "site-packages", ".next", "coverage", ".covenant"}
@@ -39,6 +39,7 @@ class RepoFacts:
     ts_entries: list[str] = field(default_factory=list)
     data_paths: list[str] = field(default_factory=list)
     db_tables: list[str] = field(default_factory=list)
+    source_language: str | None = None  # go, rust or java, checked from source
     test_commands: list[tuple[str, str]] = field(default_factory=list)  # (command, where it was found)
     migration_dirs: list[str] = field(default_factory=list)
 
@@ -47,6 +48,8 @@ class RepoFacts:
         pkgs = ", ".join(f"{p.root + '/' if p.root else ''}{p.name}" for p in self.python_packages) or "none"
         lines.append(f"- Python packages: {pkgs}")
         lines.append(f"- TypeScript entry files: {', '.join(self.ts_entries) or 'none'}")
+        if self.source_language:
+            lines.append(f"- {self.source_language.capitalize()} project (public API read from source)")
         lines.append(f"- User data locations: {', '.join(self.data_paths) or 'none found'}")
         lines.append(f"- Database tables: {', '.join(self.db_tables) or 'none found'}")
         tests = "; ".join(f"`{c}` (from {s})" for c, s in self.test_commands) or "none found"
@@ -136,6 +139,10 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
     makefile = root / "Makefile"
     if makefile.is_file() and re.search(r"^test\s*:", makefile.read_text(encoding="utf-8", errors="ignore"), re.M):
         found.append(("make test", "Makefile"))
+    for marker, cmd in (("go.mod", "go test ./..."), ("Cargo.toml", "cargo test"), ("pom.xml", "mvn -q test"),
+                        ("build.gradle", "./gradlew test"), ("build.gradle.kts", "./gradlew test")):
+        if (root / marker).is_file():
+            found.append((cmd, marker))
     pkg = root / "package.json"
     if pkg.is_file():
         try:
@@ -165,6 +172,7 @@ def ground(root: Path) -> RepoFacts:
         root=root,
         python_packages=packages,
         ts_entries=find_ts_entries(root),
+        source_language=source_api.detect_language(root),
         data_paths=find_data_paths(root, packages),
         db_tables=find_db_tables(root),
         test_commands=find_test_commands(root),

@@ -49,6 +49,11 @@ REGISTRY: dict[str, CheckerSpec] = {
             "Only allowed dependencies change, and locked versions keep their major version",
         ),
         CheckerSpec(
+            "source_api_diff",
+            ClauseKind.SEMANTIC_INVARIANT,
+            "Go, Rust or Java public API unchanged versus a baseline commit (read from source)",
+        ),
+        CheckerSpec(
             "ts_api_surface_diff",
             ClauseKind.SEMANTIC_INVARIANT,
             "TypeScript exported names and types unchanged versus a baseline commit",

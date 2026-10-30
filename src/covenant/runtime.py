@@ -32,7 +32,7 @@ from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import TraceMonitor
 from . import policy
 from .paths import claude_settings_files, default_state_dir
-from .verifiers import api_surface, dependency_diff, schema_guard, ts_api_surface
+from .verifiers import api_surface, dependency_diff, schema_guard, source_api, ts_api_surface
 from .verifiers.test_gate import run_tests
 
 SemanticVerifier = Callable[[Clause, Path, "str | None"], list[ViolationReport]]
@@ -41,6 +41,7 @@ SEMANTIC_VERIFIERS: dict[str, SemanticVerifier] = {
     "ts_api_surface_diff": ts_api_surface.verify,
     "schema_guard": schema_guard.verify,
     "dependency_diff": dependency_diff.verify,
+    "source_api_diff": source_api.verify,
 }
 MISSING = "<missing>"
 
