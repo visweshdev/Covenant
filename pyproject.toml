@@ -19,7 +19,7 @@ covenant = "covenant.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-covenant = ["verifiers/*.js", "compiler/*.md"]
+covenant = ["verifiers/*.js", "*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

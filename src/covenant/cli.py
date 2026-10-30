@@ -20,6 +20,7 @@ from . import policy
 from .ir import Covenant
 from .paths import default_state_dir
 from .runtime import Decision, Runtime
+from .status import status_json
 from .validate import validate
 
 
@@ -60,6 +61,9 @@ def _parser() -> argparse.ArgumentParser:
     claude.add_argument("--local", action="store_true", help="write to .claude/settings.local.json")
     sub.add_parser("claude-hook", help="called by Claude Code hooks (reads JSON on stdin)")
     sub.add_parser("mcp", help="run the MCP server on stdio (for Cursor, Codex and other agents)")
+    dash = sub.add_parser("dashboard", help="serve a read-only dashboard of every repo on this machine")
+    dash.add_argument("--port", type=int, default=8765)
+    dash.add_argument("--no-open", action="store_true", help="don't open a browser")
     hook = sub.add_parser("hook", help="called by git hooks")
     hook.add_argument("name", choices=["pre-commit", "pre-push"])
 
@@ -158,28 +162,6 @@ def _ci(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
     return 1 if result.failed else 0
 
 
-def _status_json(runtime: Runtime) -> dict:
-    return {
-        "repo": str(runtime.repo_root),
-        "covenant_path": str(runtime.covenant_path),
-        "state_dir": str(runtime.state_dir),
-        "has_session": runtime.has_session,
-        "session": {k: runtime.session.get(k) for k in ("started_at", "baselines", "claude_session_id")},
-        "repo_covenant_changed": runtime.repo_covenant_changed(),
-        "clauses": [c.model_dump(mode="json") for c in runtime.covenant.clauses],
-        "protected": [
-            {"clause": m.clause.id, "paths": m.path_patterns, "exclude": m.exclude_patterns}
-            for m in runtime.effect_monitors
-        ],
-        "test_commands": runtime.test_commands,
-        "trace_length": len(runtime.trace),
-        "last_events": [e.model_dump(mode="json") for e in runtime.trace[-10:]],
-        "block_counts": dict(runtime.block_counts),
-        "escalate_after": runtime.escalate_after,
-        "recent_reports": runtime.recent_reports(),
-    }
-
-
 def _compile_json(result) -> dict:
     import yaml
 
@@ -195,6 +177,29 @@ def _compile_json(result) -> dict:
         "issues": [{"clause": i.clause_id, "level": i.level, "message": i.message} for i in result.issues],
         "facts": result.facts.summary(),
     }
+
+
+def _dashboard(args: argparse.Namespace) -> int:
+    from . import dashboard
+
+    try:
+        server = dashboard.serve(args.port)
+    except OSError as exc:
+        print(f"covenant: can't listen on 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
+        return 3
+    url = f"http://127.0.0.1:{args.port}/"
+    print(f"Covenant dashboard at {url} (read-only; Ctrl+C to stop)", file=sys.stderr)
+    if not args.no_open:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 
 def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
@@ -283,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
 
         CovenantMcpServer(repo, args.covenant, args.state_dir).serve()
         return 0
+    if args.command == "dashboard":
+        return _dashboard(args)
     if args.command == "compile":
         return _compile(args, repo, covenant_path)
     if args.command == "ci":
@@ -333,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(runtime.start(), indent=2))
             return 0
         if args.command == "status" and args.format == "json":
-            print(json.dumps(_status_json(runtime), indent=2))
+            print(json.dumps(status_json(runtime), indent=2))
             return 0
         if args.command == "status":
             for c in runtime.covenant.clauses:
