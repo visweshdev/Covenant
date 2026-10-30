@@ -43,6 +43,14 @@ Intents:
 {chr(10).join(f"- {i.value}: {h}" for i, h in INTENT_HELP.items())}"""
 
 
+def _anthropic() -> Any:
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise CompileError("The Anthropic SDK isn't installed (pip install anthropic), or use --offline.") from exc
+    return anthropic
+
+
 class LLMExtractor:
     name = "claude"
 
@@ -54,13 +62,11 @@ class LLMExtractor:
     @property
     def client(self) -> Any:
         if self._client is None:
-            import anthropic
-
-            self._client = anthropic.Anthropic()
+            self._client = _anthropic().Anthropic()
         return self._client
 
     def __call__(self, instruction: str, facts: RepoFacts) -> Extraction:
-        import anthropic
+        anthropic = _anthropic()
 
         user = f"<instruction>\n{instruction}\n</instruction>\n\n<repository>\n{facts.summary()}\n</repository>"
         try:

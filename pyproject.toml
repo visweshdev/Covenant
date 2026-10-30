@@ -7,7 +7,7 @@ name = "covenant"
 version = "0.1.0"
 description = "Compile plain-English instructions for coding agents into enforced contracts."
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.6", "pyyaml>=6"]
+dependencies = ["pydantic>=2.6", "pyyaml>=6", "anthropic>=2.3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
