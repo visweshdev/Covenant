@@ -61,6 +61,17 @@ def _parser() -> argparse.ArgumentParser:
     claude.add_argument("--local", action="store_true", help="write to .claude/settings.local.json")
     sub.add_parser("claude-hook", help="called by Claude Code hooks (reads JSON on stdin)")
     sub.add_parser("mcp", help="run the MCP server on stdio (for Cursor, Codex and other agents)")
+    bench = sub.add_parser("bench", help="CovenantBench: run and score benchmark tasks").add_subparsers(dest="bench_cmd", required=True)
+    brun = bench.add_parser("run", help="run tasks and append results to a JSONL file")
+    brun.add_argument("--tasks", default="bench/tasks", help="folder of task folders")
+    brun.add_argument("--only", action="append", default=[], help="task id to run (repeatable)")
+    brun.add_argument("--mode", choices=["prompt", "covenant", "covenant-unattended", "groundtruth"], action="append", required=True)
+    brun.add_argument("--agent", choices=["scripted", "command"], default="scripted")
+    brun.add_argument("--agent-cmd", help='for --agent command, e.g. "claude -p {instruction} --permission-mode acceptEdits"')
+    brun.add_argument("--llm", action="store_true", help="compile with Claude instead of the offline extractor")
+    brun.add_argument("--out", default="bench-results.jsonl")
+    brep = bench.add_parser("report", help="summarize result files")
+    brep.add_argument("results", nargs="+")
     dash = sub.add_parser("dashboard", help="serve a read-only dashboard of every repo on this machine")
     dash.add_argument("--port", type=int, default=8765)
     dash.add_argument("--no-open", action="store_true", help="don't open a browser")
@@ -179,6 +190,32 @@ def _compile_json(result) -> dict:
     }
 
 
+def _bench(args: argparse.Namespace) -> int:
+    from .bench import runner
+    from .bench.task import load_tasks
+
+    if args.bench_cmd == "report":
+        print(runner.render_report(runner.summarize(runner.read_results([Path(p) for p in args.results]))))
+        return 0
+    tasks = [t for t in load_tasks(Path(args.tasks)) if not args.only or t.id in args.only]
+    if not tasks:
+        print(f"covenant: no tasks in {args.tasks}", file=sys.stderr)
+        return 3
+    if args.agent == "command" and not args.agent_cmd:
+        print("covenant: --agent command needs --agent-cmd", file=sys.stderr)
+        return 3
+    results = []
+    for mode in args.mode:
+        for task in tasks:
+            r = runner.run_task(task, mode, args.agent, args.agent_cmd, args.llm)
+            flag = "ok" if r.success and not r.violations else ("VIOLATION" if r.violations else "failed")
+            print(f"{mode:<11} {task.id:<28} {flag:<9} blocked={r.blocked} {', '.join(r.violations)}", file=sys.stderr)
+            results.append(r)
+    runner.write_results(results, Path(args.out))
+    print(runner.render_report(runner.summarize(results)))
+    return 0
+
+
 def _dashboard(args: argparse.Namespace) -> int:
     from . import dashboard
 
@@ -290,6 +327,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "dashboard":
         return _dashboard(args)
+    if args.command == "bench":
+        return _bench(args)
     if args.command == "compile":
         return _compile(args, repo, covenant_path)
     if args.command == "ci":

@@ -1,0 +1,8 @@
+[project]
+name = "app"
+version = "0.1.0"
+dependencies = [
+    "requests==2.31.0",
+    "flask==2.3.3",
+    "urllib3==2.2.1",
+]
