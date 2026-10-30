@@ -12,5 +12,5 @@
     "sourceMap": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "test-e2e"]
 }

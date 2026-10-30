@@ -41,6 +41,7 @@ Saving never changes anything. The editor's check runs `covenant check --preview
 ```bash
 npm install
 npm test                 # unit tests (no VS Code needed)
+npm run test:e2e -- "<path to Code executable>" <repo>   # opens VS Code on a repo and checks what it shows
 npm run package          # builds covenant-0.1.0.vsix
 code --install-extension covenant-0.1.0.vsix
 ```

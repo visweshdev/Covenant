@@ -300,11 +300,17 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   await ctrl.refresh();
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+/** What `activate` returns: read-only state, for tests and other extensions. */
+export interface CovenantApi {
+  refresh(): Promise<void>;
+  state(): { status?: Status; preview?: Decision; statusBar: string; protectedBy(relPath: string): string | undefined };
+}
+
+export function activate(context: vscode.ExtensionContext): CovenantApi | undefined {
   output = vscode.window.createOutputChannel("Covenant");
   context.subscriptions.push(output);
   const repo = findRepo();
-  if (!repo) return;
+  if (!repo) return undefined;
   const ctrl = new Controller(repo, context);
 
   context.subscriptions.push(
@@ -362,6 +368,15 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void ctrl.refresh();
+  return {
+    refresh: () => ctrl.refresh(),
+    state: () => ({
+      status: ctrl.status,
+      preview: ctrl.preview,
+      statusBar: ctrl.statusBar.text,
+      protectedBy: (relPath: string) => (ctrl.status ? protectingClause(relPath, ctrl.status.protected) : undefined),
+    }),
+  };
 }
 
 export function deactivate(): void {}
