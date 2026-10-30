@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,7 @@ DATA_DIRS = ["data", "storage", "uploads", "user_data", "userdata", "var", "db",
 DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 MIGRATION_DIRS = ["alembic/versions", "migrations", "prisma/migrations", "db/migrate", "db/migrations"]
 TEST_RUNNERS = re.compile(
-    r"\b(pytest|python -m pytest|tox|nox|npm (run )?test|yarn test|pnpm (run )?test|npx (jest|vitest)|jest|vitest|"
+    r"\b(pytest|py\.test|python -m pytest|tox|nox|npm (run )?test|yarn test|pnpm (run )?test|npx (jest|vitest)|jest|vitest|"
     r"go test|cargo test|make test|bun test)\b"
 )
 
@@ -183,7 +184,24 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
     unique: dict[str, str] = {}
     for cmd, src in found:
         unique.setdefault(cmd, src)
-    return list(unique.items())
+    # Best first: the main test suite over type checks and linters, then commands this
+    # machine can run (a CI step may use a tool, like uv or tox, that isn't installed here).
+    return sorted(unique.items(), key=lambda item: (_side_check(item[0]), not _runnable(item[0])))
+
+
+_SIDE_CHECKS = re.compile(r"--mypy|\bmypy\b|\bpyright\b|\bruff\b|\bflake8\b|\blint\b|\bcoveralls\b|--collect-only|\bbenchmark", re.I)
+
+
+def _side_check(cmd: str) -> bool:
+    """Type checks, linters and coverage uploads that only look like test runs."""
+    return bool(_SIDE_CHECKS.search(cmd))
+
+
+def _runnable(cmd: str) -> bool:
+    words = cmd.split()
+    while words and "=" in words[0] and not words[0].startswith("-"):  # FOO=1 pytest
+        words = words[1:]
+    return bool(words) and (words[0] in ("python", "python3") or shutil.which(words[0]) is not None)
 
 
 def ground(root: Path) -> RepoFacts:

@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -27,6 +26,7 @@ from ..feedback import ViolationReport
 from ..monitors.effects import normalize_path
 from ..paths import control_paths, is_under
 from ..runtime import Decision, Runtime
+from .. import testcmd
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Claude Code on Windows also has a PowerShell tool; it must get the same checks as Bash.
@@ -44,32 +44,10 @@ _WRITES = re.compile(
     r"(>|\brm\b|\bmv\b|\bcp\b|\bsed\s+-i|\btee\b|\bchmod\b|\btruncate\b|\bdel\b|\bln\b|\bdd\b|"
     r"Remove-Item|Set-Content|Out-File|Move-Item|Copy-Item|\bunlink\b|\.write_text|\.unlink|os\.remove|shutil\.)"
 )
-_CHAINING = re.compile(r"\|\||(?<!\|)\|(?!\|)|(?<!&)&(?!&)")
-
-
-def _segments(command: str) -> list[str]:
-    return [s.strip() for s in re.split(r"&&|;|\n", command) if s.strip()]
-
-
-def _same_command(a: str, b: str) -> bool:
-    try:
-        return shlex.split(a) == shlex.split(b)
-    except ValueError:
-        return " ".join(a.split()) == " ".join(b.split())
-
-
 def is_test_run(command: str, test_cmds: list[str]) -> str | None:
-    """The test command this Bash call runs, if its exit status reflects the tests.
-
-    Pipes, `||` and background `&` can hide a failure, so those never count.
-    """
-    if _CHAINING.search(command):
-        return None
-    for segment in _segments(command):
-        for cmd in test_cmds:
-            if _same_command(segment, cmd):
-                return cmd
-    return None
+    """The test command this Bash call runs, if it runs the whole suite and its exit status
+    reflects the tests (see `testcmd`)."""
+    return testcmd.match(command, test_cmds).cmd
 
 
 def git_actions(command: str) -> list[str]:
@@ -168,9 +146,18 @@ class ClaudeCodeHook:
         elif tool in SHELL_TOOLS:
             command = tool_input.get("command", "")
             exit_code = 0 if succeeded else 1
-            test_cmd = is_test_run(command, self.rt.test_commands)
-            event = TestRun(cmd=test_cmd, exit_code=exit_code) if test_cmd else Run(cmd=command, exit_code=exit_code)
+            found = testcmd.match(command, self.rt.test_commands)
+            event = TestRun(cmd=found.cmd, exit_code=exit_code) if found.cmd else Run(cmd=command, exit_code=exit_code)
             decision = self.rt.record(event)
+            if found.why_not and succeeded:
+                # Say so now, rather than leaving the agent puzzled by a blocked commit later.
+                note = f"Covenant: this test run doesn't count toward running the tests, because {found.why_not}."
+                feedback = self._feedback(decision, payload.get("hook_event_name", "PostToolUse"))
+                if feedback:
+                    feedback["reason"] = note + "\n" + feedback["reason"]
+                    return feedback
+                return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name", "PostToolUse"),
+                                               "additionalContext": note}}
         else:
             return {}
         return self._feedback(decision, payload.get("hook_event_name", "PostToolUse"))

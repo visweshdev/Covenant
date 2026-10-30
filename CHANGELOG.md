@@ -22,4 +22,6 @@ First release.
   - a local hook server;
   - CI with `covenant ci` and a GitHub Action.
 - **Tools:** team policies (`extends`), a local dashboard and a VS Code extension.
+- **Real-repo trial:** run on TinyDB. Fixed how test commands are found and recognized
+  (see `bench/README.md`).
 - **Benchmark:** CovenantBench, with 6 synthetic tasks, independent oracles and a scripted agent.

@@ -78,6 +78,11 @@ A limit counts every commit or push this task, including ones later undone with 
 
 The hook fails closed: if it crashes before a tool call, the call is denied.
 
+A test run counts when it runs the whole suite and its exit status is visible. Extra flags
+that only change output or speed (`-x`, `-v`, `-p no:cacheprovider`, `--cov`, `-n auto`,
+`2>&1`) are fine. A run that picks some tests (a path, `-k`, `-m`, `--lf`) or pipes its output
+doesn't count, and the agent is told why right away.
+
 **Cursor, Codex and other MCP clients:** `covenant --repo <path> mcp` is an MCP server with
 `covenant_rules`, `covenant_run_tests`, `covenant_record_edit`, `covenant_preflight` and
 `covenant_check`. The git hooks enforce commits and pushes for every agent.

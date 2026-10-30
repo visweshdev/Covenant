@@ -132,6 +132,8 @@ def test_command_questions(clause: Clause, facts: RepoFacts) -> list[Question]:
     def setter(cmd: str) -> Callable[[Clause], None]:
         def apply(c: Clause) -> None:
             c.params["test_cmd"] = cmd
+            # The answer below records the choice; drop the binder's guess so they can't disagree.
+            c.assumptions = [a for a in c.assumptions if not a.startswith("tests = ")]
         return apply
 
     options = [Option(f"`{cmd}` (from {src})", setter(cmd)) for cmd, src in facts.test_commands[:4]]

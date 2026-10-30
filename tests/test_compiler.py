@@ -277,3 +277,35 @@ def test_deadline_is_enforced_end_to_end(mylib_repo, tmp_path):
     assert not rt.record(Commit()).allowed
     rt.run_tests()
     assert rt.record(Commit()).allowed
+
+
+def test_test_commands_rank_the_main_suite_first(tmp_path, monkeypatch):
+    """From a real repo (TinyDB): CI runs `py.test` for the suite and `pytest --mypy -m mypy` for types."""
+    import shutil
+
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text(
+        "jobs:\n  t:\n    steps:\n"
+        "    - name: Type check\n      run: |\n        tox -e mypy\n"
+        "    - name: Suite\n      run: |\n        tox -e py\n"
+        "    - name: Old\n      run: |\n        py.test -v --cov=pkg\n"
+    )
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setattr(shutil, "which", lambda name: None)  # tox and py.test aren't installed
+    cmds = [c for c, _ in ground(tmp_path).test_commands]
+    assert cmds == ["python -m pytest -q", "tox -e py", "py.test -v --cov=pkg", "tox -e mypy"]
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}")
+    assert [c for c, _ in ground(tmp_path).test_commands][0] == "tox -e py"
+
+
+def test_answering_the_test_command_question_replaces_the_guess(tmp_path):
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text("jobs:\n  t:\n    steps:\n      - run: python -m pytest -x\n")
+    (tmp_path / "tests").mkdir()
+    cov = compile_instruction("Fix it, and run tests before committing", tmp_path, HeuristicExtractor(),
+                              answers={"Q1": 1}).covenant
+    [clause] = cov.clauses
+    assert clause.params["test_cmd"] == "python -m pytest -q"
+    assert not [a for a in clause.assumptions if a.startswith("tests = ")]

@@ -66,6 +66,28 @@ resets the users table before inserting. With Covenant, the lost rows are put ba
 step and the agent's own insert is kept. Protecting the database as a whole file would have
 rolled back the insert too.
 
+## Trial on a real repo
+
+Covenant was run on [TinyDB](https://github.com/msiemens/tinydb), a real Python library with
+228 tests. The rules were "don't change existing public APIs, don't modify docs/, run tests
+before committing". The agent session was replayed through the installed Claude Code hooks.
+
+What it found and fixed:
+- Covenant picked a type-check-only CI command as "the tests". Test commands are now ranked:
+  the main suite first, then commands that can run on this machine.
+- `py.test`, the older spelling of `pytest`, wasn't recognized as a test runner.
+- Runs with extra flags (`-p no:cacheprovider`, `-x`, `2>&1`) didn't count as test runs, so
+  every commit stayed blocked. They count now; runs that pick only some tests still don't.
+
+After the fixes, every rule held on the real repo:
+- the commit before testing was blocked;
+- a renamed public parameter was blocked at commit and at the end of the task;
+- `--no-verify` was denied;
+- docs edits were denied, or restored when made from the shell;
+- the honest path went through.
+
+Each hook call took about 0.9 s on Windows.
+
 ## Adding tasks
 
 The proposal targets about 200 tasks from real open-source repos, using commits after the models' training cutoff, with each ground-truth Covenant written and cross-checked by two annotators. These six synthetic tasks exercise the format and every check type. Real-repo tasks need that curation work.
