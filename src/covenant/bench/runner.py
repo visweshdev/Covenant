@@ -57,6 +57,23 @@ class TaskResult:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
+def bash() -> str:
+    """A real bash. On Windows a bare "bash" can start WSL's launcher from System32 (Windows
+    searches there before PATH), which fails with no Linux installed; Git's own bash works."""
+    if sys.platform != "win32":
+        return "bash"
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower() and "windowsapps" not in found.lower():
+        return found
+    git = shutil.which("git")
+    if git:
+        root = Path(git).resolve().parent.parent  # ...\Git\cmd\git.exe or ...\Git\bin\git.exe
+        for candidate in (root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"):
+            if candidate.is_file():
+                return str(candidate)
+    return found or "bash"
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *GIT_ID, "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8")
 
@@ -105,7 +122,7 @@ class ScriptedAgent:
         if self._denied(self._hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}})):
             self.log.append(f"denied: {command}")
             return False
-        r = subprocess.run(["bash", "-c", command], cwd=self.repo, capture_output=True, text=True)
+        r = subprocess.run([bash(), "-c", command], cwd=self.repo, capture_output=True, text=True)
         event = "PostToolUse" if r.returncode == 0 else "PostToolUseFailure"
         out = self._hook({"hook_event_name": event, "tool_name": "Bash", "tool_input": {"command": command}})
         self.log.append(f"ran ({r.returncode}): {command}")

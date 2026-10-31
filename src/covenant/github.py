@@ -21,6 +21,8 @@ from .ci import CiResult, markdown_summary
 from .feedback import ViolationReport
 
 MARKER = "<!-- covenant-review -->"
+LOGO = "https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png"
+BADGE = f'<img src="{LOGO}" width="18" height="18" alt="" align="top">'
 API = "https://api.github.com"
 Request = Callable[[str, str, Any], Any]  # (method, path, body) -> parsed JSON
 
@@ -75,7 +77,7 @@ def comment_body(report: ViolationReport) -> str:
     detail = ev.get("what") or ev.get("kind") or ev.get("change") or ""
     if ev.get("before") or ev.get("after"):
         detail = f"`{ev.get('before')}` → `{ev.get('after')}`"
-    return (f"**Covenant {report.violation}**: {report.clause}" + (f"\n\n{detail}" if detail else "") + hint
+    return (f"{BADGE} **Covenant {report.violation}**: {report.clause}" + (f"\n\n{detail}" if detail else "") + hint
             + f"\n\n{MARKER}")
 
 
@@ -141,10 +143,10 @@ def post(result: CiResult, repo: Path, request: Request | None = None, context: 
     if fresh:
         request("POST", f"/repos/{slug}/pulls/{number}/reviews",
                 {"commit_id": head, "event": "COMMENT", "comments": fresh,
-                 "body": f"Covenant found {len(result.reports)} broken rule(s); details on the lines below.\n\n{MARKER}"})
+                 "body": f"{BADGE} Covenant found {len(result.reports)} broken rule(s); details on the lines below.\n\n{MARKER}"})
 
     # One summary comment, edited in place.
-    summary = markdown_summary(result)
+    summary = markdown_summary(result).replace("### Covenant:", f"### {BADGE} Covenant:", 1)
     if elsewhere and inline:
         summary += f"\n{len(inline)} problem(s) are commented on their lines; the rest are listed above.\n"
     body = summary + f"\n{MARKER}"

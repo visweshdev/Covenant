@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png" width="96" alt="Covenant logo"></p>
+
 # Covenant for VS Code
 
 See and manage the rules Covenant enforces on coding agents, right in the editor. Needs the

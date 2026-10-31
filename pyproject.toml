@@ -25,6 +25,12 @@ classifiers = [
 ]
 dependencies = ["pydantic>=2.6", "pyyaml>=6", "anthropic>=2.3"]
 
+[project.urls]
+Homepage = "https://github.com/visweshdev/Covenant"
+Repository = "https://github.com/visweshdev/Covenant"
+Changelog = "https://github.com/visweshdev/Covenant/blob/main/CHANGELOG.md"
+Issues = "https://github.com/visweshdev/Covenant/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 

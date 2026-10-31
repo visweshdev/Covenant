@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo.svg" width="110" alt="Covenant logo: a C closed by a short bar"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png" width="110" alt="Covenant logo: a C closed by a short bar"></p>
 
 # Covenant
 

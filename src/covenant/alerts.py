@@ -35,6 +35,7 @@ import yaml
 from .paths import covenant_home
 
 QUIET_SECONDS = 600
+LOGO_URL = "https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png"
 TIMEOUT = 4
 
 
@@ -150,7 +151,9 @@ def send(repo: Path, state_dir: Path, event: str, reports: list[Any], cfg: dict[
     done, errors = [], []
     channels = []
     if cfg.get("slack_webhook"):
-        channels.append(("slack", lambda: _post_json(cfg["slack_webhook"], {"text": text})))
+        # username/icon_url show when the Slack app allows custom names; otherwise Slack ignores them.
+        channels.append(("slack", lambda: _post_json(cfg["slack_webhook"], {
+            "text": text, "username": "Covenant", "icon_url": LOGO_URL})))
     if cfg.get("webhook"):
         payload = {"text": text, "event": event, "repo": str(repo),
                    "reports": [r.model_dump(mode="json") if hasattr(r, "model_dump") else r for r in reports]}
