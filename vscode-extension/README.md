@@ -1,25 +1,43 @@
 <p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png" width="96" alt="Covenant logo"></p>
 
-# Covenant for VS Code
+<h1 align="center">Covenant for VS Code</h1>
 
-See and manage the rules Covenant enforces on coding agents, right in the editor. Needs the
-`covenant` command (`pip install covenant-agents`, or `pip install -e .` in a Covenant checkout).
+<p align="center">See and manage the rules <a href="https://github.com/visweshdev/Covenant">Covenant</a> enforces on coding agents, right in the editor.</p>
 
-- **Status bar:** whether every rule holds, how many issues there are, or that tests are needed before the next commit.
-- **Rules panel** (the shield in the activity bar):
-  - each rule with its scope, the assumptions it was compiled under, its current violations, and how often it has blocked the agent this task;
-  - a log of recent blocks.
-- **Problems:** each violation appears at the place it's about:
-  - the changed function's or type's definition (Python, TypeScript, Go, Rust and Java);
-  - the protected file;
-  - the migration line;
-  - the line with a secret, a skipped test, debug code or a suppressed warning;
-  - the dependency in `package.json` or `pyproject.toml`;
-  - or the rule in `covenant.yaml`.
-- **Protected files:** a 🔒 badge in the explorer on every file a rule protects.
-- **Live updates:** the panel refreshes when an agent's hooks record something, when `covenant.yaml` changes, and when you save.
+---
 
-Saving never changes anything. The editor's check runs `covenant check --preview`, which doesn't roll back files and doesn't count toward escalating the agent. So your own edits to protected data stay put until the agent's next checked step.
+## Requirements
+
+The `covenant` command:
+
+```bash
+pipx install covenant-agents
+```
+
+Or `pip install covenant-agents`, or `pip install -e .` in a Covenant checkout.
+
+## Features
+
+| | |
+|---|---|
+| **Status bar** | Whether every rule holds, how many issues there are, or that tests are needed before the next commit |
+| **Rules panel** | The shield in the activity bar: each rule with its scope, the assumptions it was compiled under, its current violations, how often it has blocked the agent this task, and a log of recent blocks |
+| **Problems** | Each violation at the place it's about (see below) |
+| **Protected files** | A 🔒 badge in the explorer on every file a rule protects |
+| **Live updates** | The panel refreshes when an agent's hooks record something, when `covenant.yaml` changes, and when you save |
+
+Problems are placed at:
+
+- the changed function's or type's definition (Python, TypeScript, Go, Rust and Java);
+- the protected file;
+- the migration line;
+- the line with a secret, a skipped test, debug code or a suppressed warning;
+- the dependency in `package.json` or `pyproject.toml`;
+- or the rule in `covenant.yaml`.
+
+> **Saving never changes anything.** The editor's check runs `covenant check --preview`, which
+> doesn't roll back files and doesn't count toward escalating the agent. Your own edits to
+> protected data stay put until the agent's next checked step.
 
 ## Commands
 
@@ -46,6 +64,8 @@ Saving never changes anything. The editor's check runs `covenant check --preview
 npm install
 npm test                 # unit tests (no VS Code needed)
 npm run test:e2e -- "<path to Code executable>" <repo>   # opens VS Code on a repo and checks what it shows
-npm run package          # builds covenant-0.1.0.vsix
-code --install-extension covenant-0.1.0.vsix
+npm run package          # builds covenant-<version>.vsix
+code --install-extension covenant-0.1.1.vsix
 ```
+
+A built `.vsix` is also attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).

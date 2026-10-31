@@ -1,4 +1,15 @@
-# Changelog
+<p align="center"><img src="docs/logo.png" width="72" alt="Covenant logo"></p>
+
+<h1 align="center">Changelog</h1>
+
+<p align="center">Install the latest with <code>pipx install covenant-agents</code> · <a href="https://github.com/visweshdev/Covenant/releases">All releases</a></p>
+
+---
+
+## Unreleased
+
+- Redesigned README, with the reference split into [docs/](docs/README.md) pages.
+- Installers install from PyPI by default (`--github` / `-GitHub` for the main branch).
 
 ## 0.1.1 (2026-10-31)
 

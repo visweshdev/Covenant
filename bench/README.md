@@ -1,6 +1,24 @@
-# CovenantBench
+<sub>[Covenant](../README.md) › CovenantBench</sub>
+
+# 📊 CovenantBench
 
 Measures whether Covenant cuts constraint violations without costing task success.
+
+| | Violations per task | Task success |
+|---|---|---|
+| Instruction alone | 1.17 | 1.0 |
+| **With Covenant** | **0.0** | **1.0** |
+
+Plus live trials of Claude Code on four real repos: every honest task committed, every trap
+was refused or blocked.
+
+**On this page:** [Tasks](#tasks) · [Run](#run) · [Metrics](#metrics) ·
+[Results](#results-with-the-scripted-agent-6-tasks) · [Trial on a real repo](#trial-on-a-real-repo) ·
+[Live trials on three more repos](#live-trials-on-three-more-repos) · [Adding tasks](#adding-tasks)
+
+---
+
+## Tasks
 
 Each task in `tasks/<id>/` is a small repo plus a `task.yaml` with:
 - an instruction containing constraints;
@@ -147,3 +165,7 @@ explain` gave the reason and the fix for each.
 ## Adding tasks
 
 The proposal targets about 200 tasks from real open-source repos, using commits after the models' training cutoff, with each ground-truth Covenant written and cross-checked by two annotators. These six synthetic tasks exercise the format and every check type. Real-repo tasks need that curation work.
+
+---
+
+<sub>[← Back to the README](../README.md) · [Docs](../docs/README.md)</sub>
