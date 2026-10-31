@@ -7,8 +7,12 @@ Two extractors share one output type:
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -137,6 +141,78 @@ class LLMExtractor:
             raise CompileError(f"The model's extraction did not match the schema: {exc}") from exc
 
 
+# ----- Claude through the Claude Code CLI (uses its login, no API key) --------
+
+_CMD_UNSAFE = set('&|<>^%"\n')  # characters a Windows .cmd shim may mangle in an argument
+
+
+class ClaudeCodeExtractor:
+    """Runs the extraction through `claude -p` so a Claude subscription login is enough.
+
+    `--restricted` ignores the repo's own settings (so Covenant's hooks don't run inside the
+    compile) and removes every tool that can run code; `--tools ""` removes the rest.
+    """
+
+    name = "claude-code"
+
+    def __init__(self, model: str | None = None, exe: str | None = None, runner: Any = None, timeout: int = 300):
+        self.model = model
+        self.exe = exe or shutil.which("claude")
+        self.runner = runner or subprocess.run
+        self.timeout = timeout
+
+    def __call__(self, instruction: str, facts: RepoFacts) -> Extraction:
+        if not self.exe:
+            raise CompileError("Claude Code isn't installed (the `claude` command), so set ANTHROPIC_API_KEY or use --offline.")
+        user = f"<instruction>\n{instruction}\n</instruction>\n\n<repository>\n{facts.summary()}\n</repository>"
+        schema = json.dumps(Extraction.model_json_schema())
+        cmd = [self.exe, "-p", "--restricted", "--strict-mcp-config", "--tools", "", "--no-session-persistence",
+               "--output-format", "json", "--json-schema", schema]
+        if self.exe.lower().endswith((".cmd", ".bat")) and _CMD_UNSAFE & set(SYSTEM_PROMPT):
+            user = f"{SYSTEM_PROMPT}\n\n{user}"  # cmd.exe could mangle it as an argument; send it with the input
+        else:
+            cmd += ["--system-prompt", SYSTEM_PROMPT]
+        if self.model:
+            cmd += ["--model", self.model]
+        with tempfile.TemporaryDirectory(prefix="covenant-compile-") as empty:  # nothing for file tools to see
+            try:
+                r = self.runner(cmd, input=user, capture_output=True, text=True, encoding="utf-8",
+                                timeout=self.timeout, cwd=empty)
+            except subprocess.TimeoutExpired as exc:
+                raise CompileError(f"Claude Code didn't answer within {self.timeout}s; try again or use --offline.") from exc
+        try:
+            out = json.loads(r.stdout)
+        except ValueError:
+            detail = (r.stderr or r.stdout).strip()[-300:]
+            raise CompileError(f"Claude Code failed (exit {r.returncode}): {detail or 'no output'}") from None
+        if out.get("is_error"):
+            message = str(out.get("result") or out.get("api_error_status") or "unknown error")
+            if "login" in message.lower():
+                raise CompileError("Claude Code isn't logged in. Run `claude` and /login, set ANTHROPIC_API_KEY, or use --offline.")
+            raise CompileError(f"Claude Code reported an error: {message}")
+        data = out.get("structured_output")
+        if data is None:
+            raise CompileError("Claude Code returned no structured extraction; try again or use --offline.")
+        try:
+            return Extraction.model_validate(data)
+        except ValueError as exc:
+            raise CompileError(f"The model's extraction did not match the schema: {exc}") from exc
+
+
+def choose_extractor(backend: str = "auto", model: str | None = None, env: Any = None) -> Extractor:
+    """`auto`: the API when a key is set, otherwise the Claude Code login, otherwise ask for --offline."""
+    env = os.environ if env is None else env
+    if backend == "offline":
+        return HeuristicExtractor()
+    if backend == "api" or (backend == "auto" and (env.get("ANTHROPIC_API_KEY") or env.get("ANTHROPIC_AUTH_TOKEN"))):
+        return LLMExtractor(**({"model": model} if model else {}))
+    if backend in ("auto", "claude-code"):
+        if backend == "auto" and not shutil.which("claude"):
+            raise CompileError("No way to reach Claude: set ANTHROPIC_API_KEY, install and log in to Claude Code, or use --offline.")
+        return ClaudeCodeExtractor(model=model)
+    raise CompileError(f"unknown backend {backend!r} (auto, api, claude-code, offline)")
+
+
 # ----- offline extractor -----------------------------------------------------
 
 _NEG = r"(?:don'?t|do not|never|must not|mustn'?t|shouldn'?t|without|avoid|no|not)\b"
@@ -147,6 +223,33 @@ _SPLIT = re.compile(
 _PATHS = re.compile(r"(?:~|\.)?[\w.-]*/[\w./*-]*|\b[\w-]+\.(?:py|ts|tsx|js|json|ya?ml|toml|db|sqlite3?|md|lock|cfg|ini|env)\b")
 
 _RULES: list[tuple[Intent, re.Pattern[str]]] = [
+    # Checked first: these phrasings also look like the older, broader rules below.
+    (Intent.FORBIDDEN_COMMANDS, re.compile(
+        rf"{_NEG}.*\b(force[ -]?push\w*|push\s+--force|push\s+-f\b|rewrite\w*\s+(?:git\s+)?history|rebase|amend|reset\s+--hard|"
+        r"sudo|rm\s+-rf|curl|wget|deploy\w*|publish\w*|kubectl|terraform|install\w*\s+(?:any\s+)?(?:new\s+)?(?:packages?|deps|dependenc\w*|librar\w*|anything)|"
+        r"network|internet|go\s+online|delete\s+(?:any\s+)?branch\w*|kill\w*|discard\w*|database\s+(?:shell|cli|directly)|system\s+settings)|"
+        rf"{_NEG}.*\b(read|open|look\s+at|access|cat|print|show)\b.*(\.env\b|\bsecrets?\b|\bcredentials?\b|\bssh\b)", re.I)),
+    (Intent.NO_SECRETS, re.compile(
+        rf"(?:{_NEG}|\bkeep\b|\bhard-?cod).*\b(secrets?|credentials?|api[ -]?keys?|tokens?|passwords?)\b|(?:{_NEG}|\bkeep\b).*\.env\b", re.I)),
+    (Intent.KEEP_TESTS, re.compile(
+        rf"{_NEG}.*\b(delet|remov|skip|disabl|weaken|comment\w*\s+out|xfail|break)\w*\b.*\btests?\b|"
+        rf"{_NEG}.*\btests?\b.*\b(weaker|skipped|disabled)\b|\bkeep\b.*\b(all|every|existing)\b.*\btests?\b", re.I)),
+    (Intent.NO_NEW_DEPENDENCIES, re.compile(
+        rf"{_NEG}.*\b(add|introduce|new|pull\s+in)\b.*\b(dependenc\w*|packages?|librar\w*|deps)\b|\bno\s+new\s+(dependenc|packages?|librar|deps)", re.I)),
+    (Intent.ONLY_PATHS, re.compile(
+        r"\b(only|just)\s+(?:change|touch|edit|modify|work\s+(?:in|on))\b|\boutside\s+(?:of\s+)?\S*/|"
+        r"\blimit\s+(?:the\s+|your\s+)?(?:changes?|edits?)\s+to\b|\bkeep\s+(?:all\s+)?(?:the\s+|your\s+)?(?:changes?|edits?)\s+(?:with)?in\b", re.I)),
+    (Intent.SMALL_CHANGE, re.compile(
+        r"\b(small|minimal|focused|tiny|surgical)\s+(change|diff|pr|patch|edit)s?\b|\bunder\s+\d+\s+lines\b|"
+        r"\b(at most|no more than|fewer than|less than|max(?:imum)?(?: of)?)\s+\d+\s+(lines|files)\b|\bkeep\s+(?:the\s+)?(?:change|diff|pr)s?\s+small", re.I)),
+    (Intent.NO_DEBUG_CODE, re.compile(
+        r"\bdebug(?:ging)?\s+(?:code|prints?|statements?|output|logs?|leftovers?)\b|console\.log|\bprint\s+statements?\b|"
+        r"\bbreakpoints?\b|\bdebugger\b|\bpdb\b", re.I)),
+    (Intent.NO_SUPPRESSIONS, re.compile(
+        r"\b(suppress|silenc|disabl|ignor|mute)\w*\b.*\b(warnings?|lint\w*|type\s*(?:check\w*|errors?)|mypy|eslint|pylint|errors)\b|"
+        r"type:\s*ignore|\bnoqa\b|ts-ignore|eslint-disable", re.I)),
+    (Intent.NO_LARGE_FILES, re.compile(
+        r"\b(large|big|huge)\s+(?:files?|binar\w*|assets?|blobs?)\b|\bbinar(?:y|ies)\b|\bfiles?\s+(?:over|larger than|bigger than)\s+\d+", re.I)),
     (Intent.PUBLIC_API_UNCHANGED, re.compile(rf"{_NEG}.*\b(apis?|interfaces?|signatures?|exports?)\b|\bkeep\b.*\b(api|backward[s]? compat)", re.I)),
     (Intent.NO_DESTRUCTIVE_MIGRATIONS, re.compile(r"\bdestructive\s+migrations?\b|\bdrop\s+(?:any\s+)?(?:columns?|tables?)\b", re.I)),
     (Intent.NO_DATA_LOSS, re.compile(rf"{_NEG}.*\b(delete|remove|wipe|lose|drop|destroy|erase|overwrite|truncate|clear|rm)\b", re.I)),

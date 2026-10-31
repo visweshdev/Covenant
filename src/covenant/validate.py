@@ -45,6 +45,11 @@ def validate(covenant: Covenant, repo_root: Path) -> list[Issue]:
         for param in spec.required_params:
             if param not in clause.params:
                 add("error", f"checker {spec.name} needs param {param!r}")
+        if spec.name == "command_guard":
+            from .verifiers.command_guard import CATEGORIES, unknown_categories
+
+            for name in unknown_categories(clause):
+                add("error", f"unknown command category {name!r}; known: {', '.join(CATEGORIES)}")
 
         if spec.name == "trace_monitor" and "formula" in clause.params:
             try:

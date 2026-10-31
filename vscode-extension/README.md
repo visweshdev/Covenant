@@ -11,6 +11,7 @@ See and manage the rules Covenant enforces on coding agents, right in the editor
   - the changed function's or type's definition (Python, TypeScript, Go, Rust and Java);
   - the protected file;
   - the migration line;
+  - the line with a secret, a skipped test, debug code or a suppressed warning;
   - the dependency in `package.json` or `pyproject.toml`;
   - or the rule in `covenant.yaml`.
 - **Protected files:** a 🔒 badge in the explorer on every file a rule protects.

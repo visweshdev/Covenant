@@ -19,6 +19,15 @@ class Intent(str, Enum):
     TESTS_WITHIN_STEPS = "tests_within_steps"
     NO_DESTRUCTIVE_MIGRATIONS = "no_destructive_migrations"
     DEPENDENCY_SCOPE = "dependency_scope"
+    NO_NEW_DEPENDENCIES = "no_new_dependencies"
+    ONLY_PATHS = "only_paths"
+    NO_SECRETS = "no_secrets"
+    KEEP_TESTS = "keep_tests"
+    SMALL_CHANGE = "small_change"
+    NO_DEBUG_CODE = "no_debug_code"
+    NO_SUPPRESSIONS = "no_suppressions"
+    NO_LARGE_FILES = "no_large_files"
+    FORBIDDEN_COMMANDS = "forbidden_commands"
     OTHER = "other"
 
 
@@ -34,6 +43,16 @@ INTENT_HELP = {
     Intent.TESTS_WITHIN_STEPS: "after each edit, the tests must run within a stated number of agent steps",
     Intent.NO_DESTRUCTIVE_MIGRATIONS: "no database migration may drop tables or columns or narrow types",
     Intent.DEPENDENCY_SCOPE: "only certain dependencies or version ranges may change",
+    Intent.NO_NEW_DEPENDENCIES: "no new packages or libraries may be added (upgrading existing ones is not this)",
+    Intent.ONLY_PATHS: "only the files or folders named may change; everything else stays as it is (list them in paths)",
+    Intent.NO_SECRETS: "no API keys, tokens, passwords or .env files may be committed or hard-coded",
+    Intent.KEEP_TESTS: "tests may not be deleted, removed, skipped, disabled or otherwise weakened",
+    Intent.SMALL_CHANGE: "the change must stay small (a number of files or lines, if stated)",
+    Intent.NO_DEBUG_CODE: "no leftover debug code: breakpoints, debugger statements, console.log or debug prints",
+    Intent.NO_SUPPRESSIONS: "warnings and type or lint errors must be fixed, not silenced (type: ignore, noqa, ts-ignore, eslint-disable)",
+    Intent.NO_LARGE_FILES: "no large files or binaries may be added",
+    Intent.FORBIDDEN_COMMANDS: "commands the agent must not run: force push, rewriting history, sudo, deploying, publishing, "
+                               "installing packages, network access, reading secret files, killing processes and the like",
     Intent.OTHER: "any other constraint (style, readability, process) with no automatic check",
 }
 

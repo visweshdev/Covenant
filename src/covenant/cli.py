@@ -39,6 +39,10 @@ def _parser() -> argparse.ArgumentParser:
     comp = sub.add_parser("compile", help="turn a plain-English instruction into covenant.yaml")
     comp.add_argument("instruction", help="the instruction you would give the agent")
     comp.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
+    comp.add_argument("--no-review", action="store_true",
+                      help="mark rules no checker covers as unenforceable instead of having Claude review commits against them")
+    comp.add_argument("--backend", choices=["auto", "api", "claude-code"], default="auto",
+                      help="how to reach Claude: the API key, or your Claude Code login (auto: API key if set)")
     comp.add_argument("--model", default=None, help="Claude model for extraction (default: claude-opus-5-5)")
     comp.add_argument("--answer", action="append", default=[], metavar="Q1=2", help="answer a question (1-based option)")
     comp.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
@@ -48,6 +52,10 @@ def _parser() -> argparse.ArgumentParser:
     amend = sub.add_parser("amend", help="add rules to the Covenant mid-task, keeping the task's history")
     amend.add_argument("instruction", help="the extra instruction, e.g. \"also don't touch config/\"")
     amend.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
+    amend.add_argument("--no-review", action="store_true",
+                      help="mark rules no checker covers as unenforceable instead of having Claude review commits against them")
+    amend.add_argument("--backend", choices=["auto", "api", "claude-code"], default="auto",
+                       help="how to reach Claude: the API key, or your Claude Code login (auto: API key if set)")
     amend.add_argument("--model", default=None, help="Claude model for extraction (default: claude-opus-5-5)")
     amend.add_argument("--answer", action="append", default=[], metavar="Q1=2", help="answer a question (1-based option)")
     amend.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
@@ -58,6 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--no-claude", action="store_true", help="skip the Claude Code hooks")
     init.add_argument("--no-git", action="store_true", help="skip the git hooks")
     init.add_argument("--local", action="store_true", help="write Claude hooks to .claude/settings.local.json")
+    init.add_argument("--no-fast-hooks", action="store_true", help="start a fresh Python per hook instead of using the daemon")
     sub.add_parser("validate", help="check the Covenant file statically")
     sub.add_parser("start", help="approve the Covenant file and begin a task")
     status = sub.add_parser("status", help="show clauses and the current trace")
@@ -69,6 +78,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("install-hooks", help="install git pre-commit and pre-push hooks")
     claude = sub.add_parser("install-claude", help="install Claude Code hooks")
     claude.add_argument("--local", action="store_true", help="write to .claude/settings.local.json")
+    claude.add_argument("--no-fast-hooks", action="store_true", help="start a fresh Python per hook instead of using the daemon")
     sub.add_parser("claude-hook", help="called by Claude Code hooks (reads JSON on stdin)")
     sub.add_parser("mcp", help="run the MCP server on stdio (for Cursor, Codex and other agents)")
     bench = sub.add_parser("bench", help="CovenantBench: run and score benchmark tasks").add_subparsers(dest="bench_cmd", required=True)
@@ -87,9 +97,12 @@ def _parser() -> argparse.ArgumentParser:
     srv.add_argument("--bind", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
     srv.add_argument("--url", help="URL the hooks should call (default: http://127.0.0.1:<port>)")
     srv.add_argument("--install", action="store_true", help="point Claude Code and git hooks at this server, then start it")
+    dmn = sub.add_parser("daemon", help="background hook server used by the fast hooks (started automatically)")
+    dmn.add_argument("--idle", type=int, default=1800, help="exit after this many idle seconds (default: 1800)")
     dash = sub.add_parser("dashboard", help="serve a read-only dashboard of every repo on this machine")
     dash.add_argument("--port", type=int, default=8765)
     dash.add_argument("--no-open", action="store_true", help="don't open a browser")
+    dash.add_argument("--read-only", action="store_true", help="don't allow editing or approving rules from the page")
     hook = sub.add_parser("hook", help="called by git hooks")
     hook.add_argument("name", choices=["pre-commit", "pre-push"])
 
@@ -152,9 +165,9 @@ def _install_git_hooks(repo: Path, covenant_path: Path, state_dir: str | None) -
     return 0
 
 
-def _install_claude(repo: Path, state_dir: str | None, local: bool) -> int:
+def _install_claude(repo: Path, state_dir: str | None, local: bool, fast: bool = True) -> int:
     name = "settings.local.json" if local else "settings.json"
-    path = claude_code.install(repo, repo / ".claude" / name, Path(state_dir).resolve() if state_dir else None)
+    path = claude_code.install(repo, repo / ".claude" / name, Path(state_dir).resolve() if state_dir else None, fast=fast)
     print(f"installed Claude Code hooks in {path}", file=sys.stderr)
     if not claude_code.importable_outside_source():
         print(
@@ -257,12 +270,17 @@ def _dashboard(args: argparse.Namespace) -> int:
     from . import dashboard
 
     try:
-        server = dashboard.serve(args.port)
+        server = dashboard.serve(args.port, editable=not args.read_only)
     except OSError as exc:
         print(f"covenant: can't listen on 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
         return 3
-    url = f"http://127.0.0.1:{args.port}/"
-    print(f"Covenant dashboard at {url} (read-only; Ctrl+C to stop)", file=sys.stderr)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    if server.token:
+        url += f"#token={server.token}"  # after '#', so it is never sent over the network or logged
+        print(f"Covenant dashboard at {url}\nAnyone with this address can approve rules; don't share it. Ctrl+C to stop.",
+              file=sys.stderr)
+    else:
+        print(f"Covenant dashboard at {url} (read-only; Ctrl+C to stop)", file=sys.stderr)
     if not args.no_open:
         import webbrowser
 
@@ -334,7 +352,7 @@ def _amend(args: argparse.Namespace, repo: Path, covenant_path: Path, result) ->
 
 
 def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
-    from .compiler.extract import CompileError, HeuristicExtractor, LLMExtractor, endpoint_note
+    from .compiler.extract import CompileError, LLMExtractor, choose_extractor, endpoint_note
     from .compiler.pipeline import compile_instruction, render_summary
 
     answers: dict[str, int] = {}
@@ -359,12 +377,17 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
             if reply.isdigit() and 1 <= int(reply) <= len(question.options):
                 return int(reply) - 1
 
-    extractor = HeuristicExtractor() if args.offline else LLMExtractor(**({"model": args.model} if args.model else {}))
-    note = None if args.offline else endpoint_note()
+    try:
+        extractor = choose_extractor("offline" if args.offline else args.backend, args.model)
+    except CompileError as exc:
+        print(f"covenant: {exc}", file=sys.stderr)
+        return 3
+    note = endpoint_note() if isinstance(extractor, LLMExtractor) else None
     if note:
         print(f"covenant: warning: {note}", file=sys.stderr)
     try:
-        result = compile_instruction(args.instruction, repo, extractor, ask=ask if interactive else None, answers=answers)
+        result = compile_instruction(args.instruction, repo, extractor, ask=ask if interactive else None, answers=answers,
+                                     review=not (args.offline or args.no_review))
     except CompileError as exc:
         print(f"covenant: {exc}", file=sys.stderr)
         return 3
@@ -429,6 +452,14 @@ def main(argv: list[str] | None = None) -> int:
         return _dashboard(args)
     if args.command == "serve":
         return _serve(args, repo)
+    if args.command == "daemon":
+        from . import server
+
+        try:
+            return server.run_daemon(repo, args.covenant, args.state_dir, args.idle)
+        except (OSError, ValueError) as exc:
+            print(f"covenant: can't start the daemon: {exc}", file=sys.stderr)
+            return 3
     if args.command == "bench":
         return _bench(args)
     if args.command == "compile":
@@ -459,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "install-hooks":
         return _install_git_hooks(repo, covenant_path, args.state_dir)
     if args.command == "install-claude":
-        return _install_claude(repo, args.state_dir, args.local)
+        return _install_claude(repo, args.state_dir, args.local, not args.no_fast_hooks)
     if args.command == "init":
         errors = [i for i in validate(covenant, repo) if i.level == "error"]
         for issue in errors:
@@ -469,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_git and _install_git_hooks(repo, covenant_path, args.state_dir):
             return 3
         if not args.no_claude:
-            _install_claude(repo, args.state_dir, args.local)
+            _install_claude(repo, args.state_dir, args.local, not args.no_fast_hooks)
         session = Runtime(covenant, repo, args.state_dir, covenant_path=covenant_path).start()
         state = args.state_dir or default_state_dir(repo)
         print(f"covenant: {len(covenant.enforced())} rules enforced; state in {state}", file=sys.stderr)

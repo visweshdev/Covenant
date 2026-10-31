@@ -25,6 +25,7 @@ class OnViolation(str, Enum):
     BLOCK = "block"
     ROLLBACK = "rollback"
     ASK_HUMAN = "ask_human"
+    WARN = "warn"  # reported, never blocks (advisory checks such as llm_review)
 
 
 class ClauseStatus(str, Enum):

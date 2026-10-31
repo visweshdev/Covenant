@@ -34,7 +34,7 @@ from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import ATOMS, TraceMonitor
 from . import policy
 from .paths import claude_settings_files, default_state_dir
-from .verifiers import api_surface, dependency_diff, schema_guard, source_api, sqlite_guard, ts_api_surface
+from .verifiers import api_surface, command_guard, dependency_diff, diff_guard, llm_review, schema_guard, source_api, sqlite_guard, ts_api_surface
 from .verifiers.test_gate import run_tests
 
 SemanticVerifier = Callable[[Clause, Path, "str | None"], list[ViolationReport]]
@@ -44,6 +44,7 @@ SEMANTIC_VERIFIERS: dict[str, SemanticVerifier] = {
     "schema_guard": schema_guard.verify,
     "dependency_diff": dependency_diff.verify,
     "source_api_diff": source_api.verify,
+    **diff_guard.VERIFIERS,
 }
 MISSING = "<missing>"
 
@@ -64,8 +65,8 @@ class Decision:
 
     @property
     def exit_code(self) -> int:
-        """0 = clean, 1 = violations (agent should revise), 2 = needs a human."""
-        if not self.reports:
+        """0 = clean, 1 = violations (agent should revise), 2 = needs a human. Warnings alone are clean."""
+        if not [r for r in self.reports if r.on_violation is not OnViolation.WARN]:
             return 0
         return 2 if self.escalated else 1
 
@@ -78,7 +79,10 @@ class Decision:
 
 
 def is_resolved(report: ViolationReport) -> bool:
-    """An effect (or lost database rows) rolled back successfully no longer needs to block anything."""
+    """An effect (or lost database rows) rolled back successfully no longer needs to block anything,
+    and an advisory warning never does."""
+    if report.on_violation is OnViolation.WARN:
+        return True
     restorable = report.kind is ClauseKind.EFFECT_PROHIBITION or report.checker == "sqlite_guard"
     return restorable and report.evidence.get("rolled_back") is True
 
@@ -128,9 +132,9 @@ class Runtime:
 
     def _configure(self, covenant: Covenant) -> None:
         self.covenant = covenant
-        self.effect_monitors = [
-            EffectMonitor(c, self.repo_root) for c in covenant.enforced(ClauseKind.EFFECT_PROHIBITION)
-        ]
+        effects = covenant.enforced(ClauseKind.EFFECT_PROHIBITION)
+        self.effect_monitors = [EffectMonitor(c, self.repo_root) for c in effects if c.checker != "command_guard"]
+        self.command_clauses = [c for c in effects if c.checker == "command_guard"]
         self.semantic_clauses = covenant.enforced(ClauseKind.SEMANTIC_INVARIANT)
         self.sqlite_clauses = [c for c in self.semantic_clauses if c.checker == "sqlite_guard"]
 
@@ -346,6 +350,28 @@ class Runtime:
             self._load_state()
             return self._integrity_reports()
 
+    def advisory_reports(self) -> list[ViolationReport]:
+        """Review findings for the current change (cached per change; never blocking)."""
+        reviews = [c for c in self.semantic_clauses if c.checker == "llm_review"]
+        if not reviews:
+            return []
+        with self._lock():
+            self._load_state()
+            return llm_review.review(reviews, self.repo_root, self.session.get("baselines", {}), self.state_dir)
+
+    def command_reports(self, command: str) -> list[ViolationReport]:
+        """Reports for a shell command that is about to run (command_guard rules)."""
+        return [r for c in self.command_clauses for r in command_guard.check(c, command)]
+
+    def scope_reports(self, path: str) -> list[ViolationReport]:
+        """Reports for a file edit that is about to happen outside the allowed files (scope_guard)."""
+        rel = normalize_path(path, self.repo_root)
+        if rel.startswith(("~", "/")) or re.match(r"^[A-Za-z]:", rel):
+            return []  # outside the repo; Covenant's own files are guarded separately
+        return [ViolationReport.for_clause(c, {"op": "edit", "target": rel},
+                                           hints=[f"Only {', '.join(c.params.get('allow', []))} may change in this task"])
+                for c in self.semantic_clauses if c.checker == "scope_guard" and not diff_guard.scope_allows(c, rel)]
+
     def would_violate(self, effect: Effect) -> list[ViolationReport]:
         """Reports for an effect that has not happened yet, so it can be denied up front."""
         target = normalize_path(effect.target, self.repo_root) if effect.channel == "fs" else effect.target
@@ -361,7 +387,7 @@ class Runtime:
         Used by editors, which check often and must not undo the human's own edits."""
         with self._lock():
             self._load_state()
-            reports = self._integrity_reports() + self._semantic_reports() + self._sqlite_reports(apply=False)
+            reports = self._integrity_reports() + self._semantic_reports(review=False) + self._sqlite_reports(apply=False)
             for effect in self.snapshotter.scan():
                 for monitor in self.effect_monitors:
                     if monitor.violates(effect):
@@ -491,9 +517,12 @@ class Runtime:
                      "within the number of steps this task allows"]
         return ViolationReport.for_clause(clause, evidence, hints=hints)
 
-    def _semantic_reports(self) -> list[ViolationReport]:
+    def _semantic_reports(self, review: bool = True) -> list[ViolationReport]:
         reports = []
         baselines = self.session.get("baselines", {})
+        reviews = [c for c in self.semantic_clauses if c.checker == "llm_review"]
+        if review and reviews:
+            reports += llm_review.review(reviews, self.repo_root, baselines, self.state_dir)
         for clause in self.semantic_clauses:
             verifier = SEMANTIC_VERIFIERS.get(clause.checker or "")
             if verifier is None:

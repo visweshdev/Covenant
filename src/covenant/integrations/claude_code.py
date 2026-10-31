@@ -105,6 +105,10 @@ class ClaudeCodeHook:
                 reports = self.rt.would_violate(Effect(op="overwrite", target=path))
                 if reports:
                     return self._deny(self._render("Covenant denied this edit", reports))
+            if path:
+                reports = self.rt.scope_reports(path)
+                if reports:
+                    return self._deny(self._render("Covenant denied this edit", reports))
             return {}
         if tool in SHELL_TOOLS:
             command = tool_input.get("command", "")
@@ -112,6 +116,9 @@ class ClaudeCodeHook:
                 return self._deny("Covenant: commands that skip or redirect git hooks or disable hooks are not allowed.")
             if _WRITES.search(command) and self._mentions_control_path(command):
                 return self._deny("Covenant: this command would modify Covenant's own files, which only a human can change.")
+            reports = self.rt.command_reports(command)
+            if reports:
+                return self._deny(self._render("Covenant refused this command", reports))
             for action in git_actions(command):
                 decision = self.rt.record(Commit() if action == "commit" else Push(), dry_run=True)
                 if not decision.allowed:
@@ -128,7 +135,8 @@ class ClaudeCodeHook:
         decision = self.rt.check("task-end")
         blocking = decision.blocking
         if not blocking:
-            return {}
+            warnings = [r for r in decision.reports if r.on_violation.value == "warn"]
+            return {"systemMessage": self._render("Covenant review notes (advisory)", warnings)} if warnings else {}
         if any(r.escalated or r.on_violation.value == "ask_human" for r in blocking):
             return {"systemMessage": self._render("Covenant: these violations need a human before this task is done", blocking)}
         return {"decision": "block", "reason": self._render("Covenant: the task can't end while rules are broken", blocking)}
@@ -149,6 +157,13 @@ class ClaudeCodeHook:
             found = testcmd.match(command, self.rt.test_commands)
             event = TestRun(cmd=found.cmd, exit_code=exit_code) if found.cmd else Run(cmd=command, exit_code=exit_code)
             decision = self.rt.record(event)
+            if succeeded and "commit" in git_actions(command):
+                warnings = self.rt.advisory_reports()
+                if warnings:
+                    note = self._render("Covenant's review found possible problems with rules it can't check "
+                                        "automatically (advisory; fix them in a follow-up commit if you agree)", warnings)
+                    return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name", "PostToolUse"),
+                                                   "additionalContext": note}}
             if found.why_not and succeeded:
                 # Say so now, rather than leaving the agent puzzled by a blocked commit later.
                 note = f"Covenant: this test run doesn't count toward running the tests, because {found.why_not}."
@@ -270,19 +285,33 @@ def hook_args(repo: Path, state_dir: Path | None) -> list[str]:
     return args + ["claude-hook"]
 
 
-def hook_handler(repo: Path, state_dir: Path | None) -> dict[str, Any]:
+def fast_hook_args(repo: Path, state_dir: Path | None) -> list[str]:
+    """Run the standard-library-only client (see `covenant.hookclient`), which forwards to a
+    background daemon and falls back to the full hook when there is none."""
+    from ..paths import default_state_dir
+
+    client = Path(__file__).resolve().parent.parent / "hookclient.py"
+    daemon = (state_dir or default_state_dir(repo)) / "daemon.json"
+    args = ["-I", "-S", client.as_posix(), "--repo", repo.as_posix(), "--daemon-file", daemon.as_posix()]
+    if state_dir:
+        args += ["--state-dir", state_dir.as_posix()]
+    return args + ["claude-hook"]
+
+
+def hook_handler(repo: Path, state_dir: Path | None, fast: bool = True) -> dict[str, Any]:
     """The hook entry. Claude Code runs shell-form hooks in Git Bash or PowerShell, and a
     command that starts with a quoted path is a syntax error in PowerShell, so the
     interpreter path goes first unquoted. Paths with spaces need exec form instead."""
     python = Path(sys.executable).as_posix()
-    args = hook_args(repo, state_dir)
-    if " " in python:
+    args = fast_hook_args(repo, state_dir) if fast else hook_args(repo, state_dir)
+    if fast or " " in python:  # exec form also skips starting a shell, which costs more than the hook
         return {"type": "command", "command": python, "args": args}
     quoted = " ".join(a if a.startswith("-") or a == "claude-hook" else f'"{a}"' for a in args)
     return {"type": "command", "command": f"{python} {quoted}"}
 
 
-def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_failure_block: bool | None = None) -> Path:
+def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_failure_block: bool | None = None,
+            fast: bool = True) -> Path:
     """Add Covenant's hooks to a Claude Code settings file, keeping everything else."""
     if on_failure_block is None:
         version = claude_version()
@@ -300,7 +329,7 @@ def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_f
     ]
     for event, matcher in plan:
         groups = [g for g in hooks.get(event, []) if not _is_ours(g)]
-        handler: dict[str, Any] = {**hook_handler(repo, state_dir), "timeout": 300}
+        handler: dict[str, Any] = {**hook_handler(repo, state_dir, fast), "timeout": 300}
         if on_failure_block and event == "PreToolUse":
             handler["onFailure"] = "block"
         group: dict[str, Any] = {"hooks": [handler]}

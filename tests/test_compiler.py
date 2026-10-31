@@ -309,3 +309,89 @@ def test_answering_the_test_command_question_replaces_the_guess(tmp_path):
     [clause] = cov.clauses
     assert clause.params["test_cmd"] == "python -m pytest -q"
     assert not [a for a in clause.assumptions if a.startswith("tests = ")]
+
+
+# ----- the Claude Code extractor, with a stand-in for `claude -p` ------------------------
+
+
+def fake_claude(payload, returncode=0, record=None):
+    def run(cmd, **kwargs):
+        if record is not None:
+            record.append((cmd, kwargs))
+        return SimpleNamespace(returncode=returncode, stdout=json.dumps(payload), stderr="")
+    return run
+
+
+EXTRACTION = {
+    "goal_action": "update_deps", "goal_span": "Update dependencies",
+    "clauses": [{"source_span": "don't change public APIs", "intent": "public_api_unchanged", "paths": [], "reading": "x"}],
+    "no_constraint_spans": [],
+}
+
+
+def test_claude_code_extractor_request_and_parse(mylib_repo):
+    from covenant.compiler.extract import ClaudeCodeExtractor
+
+    calls = []
+    ex = ClaudeCodeExtractor(exe="claude", runner=fake_claude({"is_error": False, "structured_output": EXTRACTION}, record=calls))
+    result = ex("Update dependencies, but don't change public APIs", ground(mylib_repo))
+    assert result.clauses[0].intent is Intent.PUBLIC_API_UNCHANGED
+    cmd, kwargs = calls[0]
+    assert "--restricted" in cmd and cmd[cmd.index("--tools") + 1] == ""  # no tools, repo settings ignored
+    assert json.loads(cmd[cmd.index("--json-schema") + 1])["title"] == "Extraction"
+    assert "<instruction>" in kwargs["input"] and kwargs["cwd"] != str(mylib_repo)
+
+
+def test_claude_code_extractor_errors(mylib_repo):
+    from covenant.compiler.extract import ClaudeCodeExtractor
+
+    facts = ground(mylib_repo)
+    with pytest.raises(CompileError, match="isn't logged in"):
+        ClaudeCodeExtractor(exe="claude", runner=fake_claude({"is_error": True, "result": "Not logged in · Please run /login"}))("x", facts)
+    with pytest.raises(CompileError, match="no structured"):
+        ClaudeCodeExtractor(exe="claude", runner=fake_claude({"is_error": False, "result": "hi"}))("x", facts)
+    missing = ClaudeCodeExtractor(exe="claude")
+    missing.exe = None  # as when `claude` isn't on PATH
+    with pytest.raises(CompileError, match="isn't installed"):
+        missing("x", facts)
+
+
+def test_choose_extractor(monkeypatch):
+    import shutil
+    from covenant.compiler.extract import ClaudeCodeExtractor, choose_extractor
+
+    assert isinstance(choose_extractor("auto", env={"ANTHROPIC_API_KEY": "x"}), LLMExtractor)
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/claude")
+    assert isinstance(choose_extractor("auto", env={}), ClaudeCodeExtractor)
+    assert isinstance(choose_extractor("offline", env={}), HeuristicExtractor)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(CompileError, match="--offline"):
+        choose_extractor("auto", env={})
+
+
+@pytest.mark.parametrize(("rule", "checker", "params"), [
+    ("Don't add new dependencies", "dependency_diff", {"allow_new": False, "lockfiles": False}),
+    ("Only change files in src/", "scope_guard", {"allow": ["src/**"]}),
+    ("Don't commit secrets or API keys", "secret_scan", {}),
+    ("Don't delete or skip tests", "test_guard", {}),
+    ("Keep the change under 200 lines", "diff_budget", {"max_lines": 200}),
+    ("Touch at most 3 files", "diff_budget", {"max_files": 3}),
+    ("No leftover debug prints", "no_debug_code", {"include_print": True}),
+    ("Don't silence type errors with type: ignore", "no_suppressions", {}),
+    ("Don't commit large files over 5 MB", "large_files", {"max_kb": 5120}),
+    ("Never force push or rewrite history", "command_guard", {"deny": ["force_push", "history_rewrite"]}),
+    ("Don't deploy or publish anything", "command_guard", {"deny": ["publish", "deploy"]}),
+    ("Don't read the .env file", "command_guard", {"deny": ["read_secrets"]}),
+    ("Don't install packages and no network access", "command_guard", {"deny": ["install_packages", "network"]}),
+])
+def test_new_rule_phrasings(rule, checker, params, mylib_repo):
+    cov = compile_instruction(f"Fix the bug. {rule}", mylib_repo, HeuristicExtractor()).covenant
+    [clause] = cov.clauses
+    assert clause.checker == checker and clause.status is ClauseStatus.ENFORCED
+    assert {k: clause.params[k] for k in params} == params
+
+
+def test_rules_without_specifics_ask(mylib_repo):
+    cov = compile_instruction("Fix the bug. Keep the change small. Only edit the files you need", mylib_repo,
+                              HeuristicExtractor()).covenant
+    assert [c.status for c in cov.clauses] == [ClauseStatus.PENDING_CLARIFICATION] * 2

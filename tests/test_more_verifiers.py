@@ -84,6 +84,18 @@ def test_added_and_removed(repo):
     assert changes == {("left-pad", "removed"), ("lodash", "added")}
 
 
+def test_no_new_dependencies_ignores_indirect_lockfile_entries(repo):
+    lock = json.loads((repo / "package-lock.json").read_text())
+    lock["packages"]["node_modules/loose-envify"] = {"version": "1.4.0"}  # pulled in by an upgrade
+    (repo / "package-lock.json").write_text(json.dumps(lock))
+    no_new = dict(allow_new=False, allow_removed=True, deny_major=False)
+    assert dependency_diff.verify(clause("dependency_diff", **no_new, lockfiles=False), repo) == []
+    assert dependency_diff.verify(clause("dependency_diff", **no_new), repo)  # counted when lockfiles are checked
+    (repo / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "^1.0.0", "react": "^18.2.0", "lodash": "^4"}}))
+    [r] = dependency_diff.verify(clause("dependency_diff", **no_new, lockfiles=False), repo)
+    assert (r.evidence["symbol"], r.evidence["change"]) == ("lodash", "added")
+
+
 # ----- the compiler binds to them --------------------------------------------------------
 
 

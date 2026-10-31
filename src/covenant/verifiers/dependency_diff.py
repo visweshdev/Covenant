@@ -9,6 +9,8 @@ Clause params:
     deny_major:  a locked version may not move to a new major version (default true)
     allow_new:   new dependencies may be added (default true)
     allow_removed: dependencies may be removed (default false)
+    lockfiles:   also compare lockfiles (default true); false checks only the packages the
+                 project declares, so an upgrade that pulls in new indirect packages is fine
     baseline:    git ref (the runtime pins it to a sha at start)
 """
 
@@ -123,7 +125,7 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
     def allowed(key: str) -> bool:
         return not allow or _norm(key.partition(":")[2]) in allow
 
-    for source in (declared, locked):
+    for source in (declared, locked) if params.get("lockfiles", True) else (declared,):
         before, after = source(before_read), source(after_read)
         for key in sorted(set(before) | set(after)):
             old, new = before.get(key), after.get(key)

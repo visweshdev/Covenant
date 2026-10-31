@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..compiler.extract import HeuristicExtractor, LLMExtractor
+from ..compiler.extract import HeuristicExtractor, choose_extractor
 from ..compiler.pipeline import compile_instruction
 from ..integrations.claude_code import ClaudeCodeHook
 from ..ir import ClauseStatus, Covenant
@@ -181,7 +181,7 @@ def run_task(task: Task, mode: str, agent: str = "scripted", agent_cmd: str | No
         if mode.startswith("covenant"):
             import re
 
-            extractor = LLMExtractor() if llm else HeuristicExtractor()
+            extractor = choose_extractor() if llm else HeuristicExtractor()
 
             def developer(question) -> int:  # answers like the task's author would
                 for pattern, choice in task.answers.items():

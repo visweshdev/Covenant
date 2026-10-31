@@ -83,6 +83,7 @@ def compile_instruction(
     ask: AskFn | None = None,
     answers: dict[str, int] | None = None,
     max_questions: int = 3,
+    review: bool = False,
 ) -> CompileResult:
     instruction = instruction.strip()
     if not instruction:
@@ -91,7 +92,7 @@ def compile_instruction(
     extraction = extractor(instruction, facts)
     issues = check_spans(instruction, extraction)
 
-    clauses = Binder(facts).bind_all(extraction.clauses)
+    clauses = Binder(facts, review=review).bind_all(extraction.clauses)
     questions = find_questions(clauses, facts)
     by_id = {c.id: c for c in clauses}
     result_asked, result_defaulted = [], []

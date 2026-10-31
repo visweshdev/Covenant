@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import secrets
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -55,6 +58,9 @@ class HookServer(ThreadingHTTPServer):
         self.repo, self.covenant, self.state_dir_arg = repo, covenant, state_dir
         self.state_dir = runtime.state_dir
         self.token = ensure_token(self.state_dir)
+
+        self.last_request = time.monotonic()
+        self.code_stamp = code_stamp()
 
     def runtime(self) -> Runtime:
         runtime = Runtime.open(self.repo, covenant_path=self.covenant, state_dir=self.state_dir_arg)
@@ -95,6 +101,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "too large"})
             return
         body = self.rfile.read(length)  # read first: replying early makes Windows reset the connection
+        self.server.last_request = time.monotonic()
+        if getattr(self.server, "daemon_mode", False) and code_stamp() != self.server.code_stamp:
+            # Covenant was upgraded under us: let the client fall back to a fresh process, and quit.
+            self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "covenant code changed; restarting"})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if not self._authorized():
             self._send(HTTPStatus.UNAUTHORIZED, {"error": "missing or wrong token"})
             return
@@ -117,6 +129,70 @@ class Handler(BaseHTTPRequestHandler):
             # Fail closed: Claude Code treats a non-2xx response as a hook failure, and the git
             # hook script refuses the commit when the server can't answer.
             self._send(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"{type(exc).__name__}: {exc}"})
+
+
+def code_stamp() -> tuple[int, int]:
+    """Changes when Covenant's own code changes (an upgrade or an edit)."""
+    root = Path(__file__).parent
+    files = list(root.rglob("*.py"))
+    return len(files), max((f.stat().st_mtime_ns for f in files), default=0)
+
+
+def daemon_file(state_dir: Path) -> Path:
+    return state_dir / "daemon.json"
+
+
+def _alive(info: dict[str, Any]) -> bool:
+    import http.client
+
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", int(info["port"]), timeout=2)
+        conn.request("GET", "/health")
+        ok = conn.getresponse().status == 200
+        conn.close()
+        return ok
+    except (OSError, ValueError, KeyError, http.client.HTTPException):
+        return False
+
+
+def run_daemon(repo: Path, covenant: str | None, state_dir: str | None, idle_seconds: int = 1800) -> int:
+    """A per-repo hook server on a random local port, found through <state>/daemon.json.
+
+    Started on demand by the fast hook client; exits after `idle_seconds` without requests,
+    or when Covenant's code changes.
+    """
+    httpd = HookServer(("127.0.0.1", 0), repo, covenant, state_dir)
+    httpd.daemon_mode = True
+    path = daemon_file(httpd.state_dir)
+    try:
+        if path.is_file() and _alive(json.loads(path.read_text(encoding="utf-8"))):
+            httpd.server_close()
+            return 0  # another daemon already serves this repo
+    except ValueError:
+        pass
+    info = {"port": httpd.server_address[1], "token": httpd.token, "pid": os.getpid()}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(info), encoding="utf-8")
+    os.replace(tmp, path)
+
+    def watchdog() -> None:
+        while True:
+            time.sleep(min(30, idle_seconds))
+            if time.monotonic() - httpd.last_request > idle_seconds:
+                httpd.shutdown()
+                return
+
+    threading.Thread(target=watchdog, daemon=True).start()
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
+        try:
+            if json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid():
+                path.unlink()
+        except (OSError, ValueError):
+            pass
+    return 0
 
 
 def git_hook_script(name: str, url: str, token: str) -> str:

@@ -18,7 +18,9 @@ covenant init                          # git hooks + Claude Code hooks, then sta
 ## How it works
 
 1. **Compile** (`covenant compile`): Claude, or the offline extractor with `--offline`, splits the
-   instruction into a goal and clauses. Deterministic passes then:
+   instruction into a goal and clauses. Claude is reached through `ANTHROPIC_API_KEY` if it is set,
+   and otherwise through your Claude Code login (`claude -p`), so a Claude subscription is enough
+   (`--backend api|claude-code` to choose). Deterministic passes then:
    - ground each clause in the repo: the real exports, data folders, tables and test command;
    - bind it to a checker;
    - ask at most three questions about specific things in the repo;
@@ -43,9 +45,45 @@ covenant init                          # git hooks + Claude Code hooks, then sta
 | Semantic invariant | `sqlite_guard` | Rows, tables and columns in SQLite databases are never lost; inserts are allowed. Checked after every step, and lost rows are put back from a snapshot |
 | Effect prohibition | `effect_monitor` | Protected files and tables aren't deleted, truncated or overwritten, whatever does it; rolled back from a snapshot |
 | Temporal obligation | `trace_monitor` | Ordering, limit and deadline rules over the agent's steps, in past-time LTL (see below) |
+| Semantic invariant | `scope_guard` | Only the files you name change ("only change files in src/"); optionally no new or deleted files |
+| Semantic invariant | `secret_scan` | No API keys, tokens, private keys, passwords or `.env` files in the change (reports are masked) |
+| Semantic invariant | `test_guard` | Tests aren't deleted, removed, skipped or focused with `.only` |
+| Semantic invariant | `diff_budget` | The change stays within a number of files or lines |
+| Semantic invariant | `no_debug_code` | No breakpoints, `debugger`, `console.log` or (optionally) debug prints left behind |
+| Semantic invariant | `no_suppressions` | No new `# type: ignore`, `# noqa`, `@ts-ignore`, `eslint-disable` and the like |
+| Semantic invariant | `large_files` | No added or changed file over a size limit |
+| Effect prohibition | `command_guard` | Shell commands refused before they run (see below) |
+| Semantic invariant | `llm_review` | Claude reviews each commit against a rule no checker covers; advisory, never blocks |
 
-A rule with no checker ("keep the code readable") is kept and marked `unenforceable`,
-never silently dropped.
+A rule with no checker ("keep the code readable") becomes an `llm_review` rule when Claude is
+available: Claude reads each commit's change against it, and its findings go to the agent and to
+you as warnings that never block. With `--offline` or `--no-review` the rule is kept and marked
+`unenforceable`, never silently dropped.
+
+### Rules the compiler understands
+
+| Say | Becomes |
+|---|---|
+| "don't change public APIs" | `api_surface_diff` / `ts_api_surface_diff` / `source_api_diff` |
+| "don't delete user data", "don't touch config/" | `effect_monitor`, `sqlite_guard` |
+| "no destructive migrations" | `schema_guard` |
+| "only update requests", "no major upgrades" | `dependency_diff` |
+| "don't add new dependencies" | `dependency_diff` (upgrades are fine; new packages aren't) |
+| "only change files in src/" | `scope_guard` |
+| "don't commit secrets or API keys" | `secret_scan` |
+| "don't delete or skip tests" | `test_guard` |
+| "keep the change under 200 lines", "touch at most 3 files" | `diff_budget` |
+| "no leftover debug prints" | `no_debug_code` |
+| "don't silence type errors" | `no_suppressions` |
+| "don't commit files over 5 MB" | `large_files` |
+| "run tests before committing", "push at most once", "run tests within 5 steps of an edit" | `trace_monitor` |
+| "never force push", "don't deploy", "don't install packages", "no network access", "don't read .env" | `command_guard` |
+
+`command_guard` categories: `force_push`, `history_rewrite`, `branch_delete`, `discard_changes`,
+`sudo`, `pipe_to_shell`, `recursive_delete`, `install_packages`, `publish`, `deploy`, `network`,
+`read_secrets`, `database_cli`, `kill_processes`, `system_changes`, plus your own `patterns`.
+It guards against mistakes and shortcuts; an agent determined to hide a command (by writing it
+into a script first) needs the container setup.
 
 ### Rules over the agent's steps
 
@@ -77,6 +115,13 @@ A limit counts every commit or push this task, including ones later undone with 
 | `Stop` | Claude can't finish while a rule is broken; after repeated blocks it hands over to you |
 
 The hook fails closed: if it crashes before a tool call, the call is denied.
+
+Hooks are fast: each one starts a tiny client that uses only Python's standard library and hands
+the event to a background `covenant daemon` for the repo, which keeps Covenant loaded. That takes
+about 0.2 s per agent action on Windows instead of about 1 s. When no daemon answers, the client
+runs the full check itself and starts one, so a missing daemon never skips a check. The daemon
+listens on 127.0.0.1 only, exits after 30 idle minutes, and restarts when Covenant is upgraded.
+`covenant init --no-fast-hooks` starts a fresh Python for every hook instead.
 
 A test run counts when it runs the whole suite and its exit status is visible. Extra flags
 that only change output or speed (`-x`, `-v`, `-p no:cacheprovider`, `--cov`, `-n auto`,
@@ -113,13 +158,19 @@ Policy rules:
 
 ## Dashboard
 
-`covenant dashboard` opens a read-only page on `127.0.0.1:8765` covering every repo Covenant enforces
-on this machine:
+`covenant dashboard` opens a page on `127.0.0.1:8765` covering every repo Covenant enforces on this
+machine:
 - each repo's rules, with how close each is to handing over to a human;
 - a timeline of blocks and reports;
-- recent events and protected paths.
+- recent events and protected paths;
+- an editor for the rules: write a rule in plain English and Claude drafts it, check the result,
+  then save and approve. Added rules apply from now on, like `covenant amend`; changing or
+  removing a rule restarts the task, after asking.
 
-It refreshes every few seconds, answers GET only, and rejects requests whose Host header isn't localhost.
+It refreshes every few seconds and rejects requests whose Host header isn't localhost. Changes
+need a key created at start: the browser gets it in the part of the address after `#`, which is
+never sent over the network, and the page removes it from the address bar. Requests from other
+web pages are refused. `--read-only` turns editing off.
 
 ## Hook server
 
@@ -162,20 +213,21 @@ How the CI check judges a pull request:
 
 | Command | What it does |
 |---|---|
-| `covenant compile "<instruction>"` | Writes `covenant.yaml`. Flags: `--offline`, `--unattended`, `--answer Q1=2`, `--dry-run`, `--yes` |
-| `covenant init` | Validates, installs git and Claude Code hooks, starts a session |
+| `covenant compile "<instruction>"` | Writes `covenant.yaml`. Flags: `--offline`, `--backend`, `--no-review`, `--unattended`, `--answer Q1=2`, `--dry-run`, `--yes` |
+| `covenant init` | Validates, installs git and Claude Code hooks, starts a session (`--no-fast-hooks`) |
 | `covenant start` | Approves the current `covenant.yaml` and begins a task |
 | `covenant amend "<instruction>"` | Adds rules mid-task, keeping the history; only additions are accepted. Same flags as `compile` |
 | `covenant test` / `check` / `status` | Runs the declared tests / every check / shows the state |
 | `covenant ci` | Checks a pull request (`--base`, `--format github\|json\|text`, `--no-tests`) |
 | `covenant mcp` | Runs the MCP server |
 | `covenant serve` | Runs the hook server (`--install` points Claude Code and git at it) |
-| `covenant dashboard` | Opens the local dashboard |
+| `covenant dashboard` | Opens the local dashboard, where rules can be edited and approved (`--read-only`) |
+| `covenant daemon` | The background process behind the fast hooks (started automatically) |
 | `covenant bench run` / `report` | Runs and scores CovenantBench (see `bench/README.md`) |
 
 Exit codes: 0 clean, 1 violations (the agent should revise), 2 needs a human, 3 bad setup.
 
-Compiling with Claude reads `ANTHROPIC_API_KEY`. If `ANTHROPIC_BASE_URL` points somewhere other
+Compiling with Claude reads `ANTHROPIC_API_KEY`, or uses your Claude Code login when it isn't set. If `ANTHROPIC_BASE_URL` points somewhere other
 than Anthropic (agent CLIs and proxies often export it), `compile` warns you; set
 `COVENANT_ANTHROPIC_BASE_URL=https://api.anthropic.com` to override it for Covenant only.
 
