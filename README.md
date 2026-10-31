@@ -11,7 +11,7 @@ protected files however they were touched, and the order of events (tests passed
 last edit, before the commit).
 
 ```bash
-sh install.sh                          # or on Windows: powershell -File install.ps1  (pipx, from GitHub)
+pipx install covenant-agents           # or: pip install covenant-agents, or sh install.sh / install.ps1
 cd your-repo
 covenant compile "Update dependencies, but don't change public APIs, don't delete user data, and run tests before committing."
 covenant init                          # git hooks + Claude Code hooks, then start enforcing

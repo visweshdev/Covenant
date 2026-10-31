@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install Covenant with pipx (its own environment, `covenant` on your PATH).
-#   sh install.sh           # from GitHub (main branch)
-#   sh install.sh --pypi    # from PyPI, once covenant-agents is published there
+#   sh install.sh            # the latest release from PyPI
+#   sh install.sh --github   # the newest code from GitHub (main branch)
 set -eu
 
 REPO_URL="git+https://github.com/visweshdev/Covenant.git"
@@ -18,10 +18,10 @@ else
   PIPX="$PY -m pipx"
 fi
 
-if [ "${1:-}" = "--pypi" ]; then
-  $PIPX install --force covenant-agents
-else
+if [ "${1:-}" = "--github" ]; then
   $PIPX install --force "$REPO_URL"
+else
+  $PIPX install --force covenant-agents
 fi
 
 echo

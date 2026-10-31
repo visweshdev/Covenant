@@ -1,7 +1,7 @@
 # Install Covenant with pipx on Windows (its own environment, `covenant` on your PATH).
-#   powershell -ExecutionPolicy Bypass -File install.ps1          # from GitHub (main branch)
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -PyPI    # from PyPI, once covenant-agents is published there
-param([switch]$PyPI)
+#   powershell -ExecutionPolicy Bypass -File install.ps1           # the latest release from PyPI
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -GitHub   # the newest code from GitHub (main branch)
+param([switch]$GitHub)
 $ErrorActionPreference = "Stop"
 $RepoUrl = "git+https://github.com/visweshdev/Covenant.git"
 
@@ -18,8 +18,8 @@ if ($LASTEXITCODE -ne 0) {
     & $py.Source -m pipx ensurepath | Out-Null
 }
 
-if ($PyPI) { & $py.Source -m pipx install --force covenant-agents }
-else { & $py.Source -m pipx install --force $RepoUrl }
+if ($GitHub) { & $py.Source -m pipx install --force $RepoUrl }
+else { & $py.Source -m pipx install --force covenant-agents }
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host ""
