@@ -43,6 +43,11 @@ def _git(repo: Path, *args: str, index: Path | None = None, check: bool = True) 
     env = dict(os.environ)
     if index is not None:
         env["GIT_INDEX_FILE"] = str(index)
+    # Snapshot commits are Covenant's own, and must work where no git name/email is set (CI, containers).
+    for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        env[key] = "Covenant snapshot"
+    for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        env[key] = "covenant@localhost"
     r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", env=env)
     if check and r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args[:2])} failed: {r.stderr.strip()[:300]}")
