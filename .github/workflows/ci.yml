@@ -30,7 +30,15 @@ jobs:
         shell: bash
         env:
           COVENANT_TYPESCRIPT: ${{ runner.temp }}/ts/node_modules/typescript
-        run: python -m pytest -q
+        # Failures also become annotations, which anyone can read (job logs need admin rights).
+        run: |
+          set +e
+          python -m pytest -q --tb=short -rfE 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          grep -E "^(FAILED|ERROR) |^E  |^tests[/\\\\].*:[0-9]+: " pytest.log | head -40 | while IFS= read -r line; do
+            echo "::error title=pytest::${line//%/%25}"
+          done
+          exit $status
 
   extension:
     runs-on: ubuntu-latest
