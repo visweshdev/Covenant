@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 440" width="1280" height="440" role="img" aria-label="Covenant: rules for coding agents that actually hold">
+  <title>Covenant: rules for coding agents that actually hold</title>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#f4efe6" opacity="0.07"/>
+    </pattern>
+    <radialGradient id="glow" cx="18%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#b5452f" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#b5452f" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="brush" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="4"/>
+      <feDisplacementMap in="SourceGraphic" scale="3.2"/>
+    </filter>
+    <clipPath id="card"><rect width="1280" height="440" rx="24"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#card)">
+    <rect width="1280" height="440" fill="#1d1b19"/>
+    <rect width="1280" height="440" fill="url(#dots)"/>
+    <rect width="1280" height="440" fill="url(#glow)"/>
+    <!-- a thin seal line along the bottom -->
+    <rect y="432" width="1280" height="8" fill="#b5452f"/>
+  </g>
+
+  <!-- the sealed C -->
+  <g transform="translate(78 92) scale(2.1)">
+    <g filter="url(#brush)" fill="none" stroke-linecap="round">
+      <g transform="translate(4 0) rotate(-6 58 60)">
+        <path d="M 83.3 37.3 A 34 34 0 1 0 83.3 82.7" stroke="#f4efe6" stroke-width="17"/>
+        <path d="M 91 45.5 C 92.2 53, 92.4 66, 91.3 74.5" stroke="#e0684f" stroke-width="10"/>
+      </g>
+    </g>
+  </g>
+
+  <g font-family="Georgia, 'Iowan Old Style', 'Palatino Linotype', serif" fill="#f4efe6">
+    <text x="372" y="178" font-size="88" letter-spacing="-1">Covenant</text>
+    <text x="374" y="232" font-size="30" fill="#e8dfd0" font-style="italic">Rules for coding agents that actually hold.</text>
+  </g>
+  <text x="374" y="274" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="19" fill="#a59b8c">
+    Plain English in. Enforced while the agent works, in git, and in CI.
+  </text>
+
+  <!-- three rule chips -->
+  <g font-family="'SF Mono', Consolas, 'DejaVu Sans Mono', Menlo, monospace" font-size="16">
+    <g transform="translate(374 318)">
+      <rect width="262" height="44" rx="22" fill="#26231f" stroke="#3a3530"/>
+      <circle cx="24" cy="22" r="9" fill="#6fae73"/>
+      <path d="M19.5 22.5 l3 3 l5.5 -6" stroke="#1d1b19" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="44" y="27.5" fill="#e8dfd0">public API unchanged</text>
+    </g>
+    <g transform="translate(652 318)">
+      <rect width="282" height="44" rx="22" fill="#26231f" stroke="#3a3530"/>
+      <circle cx="24" cy="22" r="9" fill="#6fae73"/>
+      <path d="M19.5 22.5 l3 3 l5.5 -6" stroke="#1d1b19" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="44" y="27.5" fill="#e8dfd0">tests passed, then commit</text>
+    </g>
+    <g transform="translate(950 318)">
+      <rect width="262" height="44" rx="22" fill="#2e1f1b" stroke="#6b3226"/>
+      <circle cx="24" cy="22" r="9" fill="#e0684f"/>
+      <path d="M20 18 l8 8 M28 18 l-8 8" stroke="#1d1b19" stroke-width="2.4" stroke-linecap="round"/>
+      <text x="44" y="27.5" fill="#f1b8aa">push --force: refused</text>
+    </g>
+  </g>
+</svg>

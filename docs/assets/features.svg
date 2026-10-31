@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-label="Features: checks outcomes not tool calls; refuses risky commands before they run; undo with restore points; explains every block; works with every agent; CI rules a pull request can't weaken">
+  <title>What Covenant does</title>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1d1b19" flood-opacity="0.09"/>
+    </filter>
+  </defs>
+  <style>
+    .card { fill: #fffdf8; stroke: #e2d8c6; }
+    .badge { fill: #f6e3dd; }
+    .ico { fill: none; stroke: #b5452f; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .h { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif; font-size: 23px; fill: #1d1b19; }
+    .p { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 15px; fill: #5c544a; }
+    .m { font-family: 'SF Mono', Consolas, 'DejaVu Sans Mono', Menlo, monospace; font-size: 13.5px; fill: #1d1b19; }
+  </style>
+
+  <rect width="1200" height="560" rx="24" fill="#f4efe6"/>
+
+  <!-- row 1 -->
+  <g transform="translate(32 32)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- target -->
+    <g class="ico"><circle cx="50" cy="52" r="12"/><circle cx="50" cy="52" r="4.5"/><path d="M50 34v6M50 64v6M32 52h6M62 52h6"/></g>
+    <text class="h" x="28" y="122">Outcomes, not tool calls</text>
+    <text class="p" x="28" y="154">Checks the API surface, protected data</text>
+    <text class="p" x="28" y="176">and the order of steps, however the</text>
+    <text class="p" x="28" y="198">agent got there.</text>
+  </g>
+
+  <g transform="translate(417 32)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- shield with a bar -->
+    <g class="ico"><path d="M50 36 l13 5 v10 c0 9 -6 15 -13 18 c-7 -3 -13 -9 -13 -18 v-10 z"/><path d="M44 52h12"/></g>
+    <text class="h" x="28" y="122">Refused before it runs</text>
+    <text class="p" x="28" y="154">Force pushes, deploys, destructive SQL,</text>
+    <text class="p" x="28" y="176">hosts off the allowlist: 16 kinds of</text>
+    <text class="p" x="28" y="198">command never get to run.</text>
+  </g>
+
+  <g transform="translate(802 32)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- undo arrow -->
+    <g class="ico"><path d="M40 46 h14 a9 9 0 0 1 0 18 h-10"/><path d="M45 40 l-6 6 l6 6"/></g>
+    <text class="h" x="28" y="122">Undo anything</text>
+    <text class="p" x="28" y="154">A restore point before every risky step,</text>
+    <text class="p" x="28" y="176">untracked files included.</text>
+    <text class="m" x="28" y="204">covenant undo</text>
+  </g>
+
+  <!-- row 2 -->
+  <g transform="translate(32 296)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- speech bubble -->
+    <g class="ico"><path d="M37 42 h26 a3 3 0 0 1 3 3 v13 a3 3 0 0 1 -3 3 h-15 l-7 6 v-6 h-4 a3 3 0 0 1 -3 -3 v-13 a3 3 0 0 1 3 -3 z"/><path d="M43 50h14M43 55h9"/></g>
+    <text class="h" x="28" y="122">Explains itself</text>
+    <text class="p" x="28" y="154">Every block names the rule, the evidence</text>
+    <text class="p" x="28" y="176">and the fix, for the agent and for you.</text>
+    <text class="m" x="28" y="204">covenant explain</text>
+  </g>
+
+  <g transform="translate(417 296)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- plug / nodes -->
+    <g class="ico"><circle cx="50" cy="52" r="5"/><circle cx="38" cy="40" r="3.5"/><circle cx="63" cy="41" r="3.5"/><circle cx="40" cy="65" r="3.5"/><circle cx="62" cy="64" r="3.5"/><path d="M46 48l-5-5M54 48l6-5M46 56l-4 6M54 56l5 5"/></g>
+    <text class="h" x="28" y="122">Every agent</text>
+    <text class="p" x="28" y="154">Claude Code, Cursor, Codex, any MCP</text>
+    <text class="p" x="28" y="176">client, or plain git. Fast hooks: about</text>
+    <text class="p" x="28" y="198">0.2 s per action.</text>
+  </g>
+
+  <g transform="translate(802 296)" filter="url(#shadow)">
+    <rect class="card" width="365" height="232" rx="18"/>
+    <circle class="badge" cx="50" cy="52" r="26"/>
+    <!-- pull request -->
+    <g class="ico"><circle cx="40" cy="40" r="4"/><circle cx="40" cy="65" r="4"/><circle cx="61" cy="65" r="4"/><path d="M40 44v17M61 61v-11a6 6 0 0 0 -6 -6h-7"/><path d="M51 40l-4 4l4 4"/></g>
+    <text class="h" x="28" y="122">CI it can't weaken</text>
+    <text class="p" x="28" y="154">Pull requests are judged by the base</text>
+    <text class="p" x="28" y="176">commit's rules, with comments on the</text>
+    <text class="p" x="28" y="198">exact lines that break them.</text>
+  </g>
+</svg>

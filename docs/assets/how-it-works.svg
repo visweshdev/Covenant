@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="How Covenant works: you write rules in plain English, covenant compile turns them into typed rules in covenant.yaml, and they are enforced while the agent works, at commit and push, and on every pull request">
+  <title>How Covenant works</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#b5452f"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#1d1b19" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <style>
+    .sans { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+    .serif { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif; }
+    .mono { font-family: 'SF Mono', Consolas, 'DejaVu Sans Mono', Menlo, monospace; }
+    .step { font-size: 12.5px; letter-spacing: 1.6px; fill: #b5452f; font-weight: 700; }
+    .h { font-size: 22px; fill: #1d1b19; }
+    .p { font-size: 14.5px; fill: #5c544a; }
+    .card { fill: #fffdf8; stroke: #e2d8c6; }
+    .flow { stroke: #b5452f; stroke-width: 2.2; fill: none; stroke-dasharray: 6 6; }
+  </style>
+
+  <rect width="1200" height="420" rx="24" fill="#f4efe6"/>
+
+  <!-- 1. you write -->
+  <g transform="translate(36 70)" filter="url(#shadow)">
+    <rect class="card" width="250" height="280" rx="16"/>
+    <text class="sans step" x="24" y="38">1 · YOU WRITE</text>
+    <text class="serif h" x="24" y="72">Plain English</text>
+    <g class="serif" font-style="italic" font-size="16" fill="#3d3731">
+      <text x="24" y="118">“Don't change public</text>
+      <text x="24" y="142">APIs, don't delete user</text>
+      <text x="24" y="166">data, and run tests</text>
+      <text x="24" y="190">before committing.”</text>
+    </g>
+    <text class="sans p" x="24" y="240">or start from a rule pack:</text>
+    <text class="mono" x="24" y="262" font-size="13.5" fill="#1d1b19">--pack hotfix</text>
+  </g>
+
+  <path class="flow" d="M290 210 H330" marker-end="url(#arrow)"/>
+
+  <!-- 2. compile -->
+  <g transform="translate(336 70)" filter="url(#shadow)">
+    <rect class="card" width="250" height="280" rx="16"/>
+    <text class="sans step" x="24" y="38">2 · COVENANT COMPILES</text>
+    <text class="serif h" x="24" y="72">Typed rules</text>
+    <g class="sans p">
+      <text x="24" y="112">Grounds each rule in your</text>
+      <text x="24" y="134">repo: real exports, data,</text>
+      <text x="24" y="156">tables and test command.</text>
+      <text x="24" y="190">Asks at most 3 questions.</text>
+      <text x="24" y="212">You approve the result.</text>
+    </g>
+    <rect x="24" y="234" width="202" height="30" rx="8" fill="#1d1b19"/>
+    <text class="mono" x="125" y="254" font-size="13.5" fill="#f4efe6" text-anchor="middle">covenant.yaml</text>
+  </g>
+
+  <path class="flow" d="M590 210 H630" marker-end="url(#arrow)"/>
+
+  <!-- 3. checkers -->
+  <g transform="translate(636 70)" filter="url(#shadow)">
+    <rect width="230" height="280" rx="16" fill="#1d1b19"/>
+    <text class="sans step" x="22" y="38" fill="#e0684f">3 · BOUND TO CHECKERS</text>
+    <g class="mono" font-size="13.5">
+      <text x="22" y="84" fill="#d9a95b">C1</text><text x="52" y="84" fill="#f4efe6">api_surface_diff</text>
+      <text x="22" y="120" fill="#d9a95b">C2</text><text x="52" y="120" fill="#f4efe6">effect_monitor</text>
+      <text x="22" y="156" fill="#d9a95b">C3</text><text x="52" y="156" fill="#f4efe6">sqlite_guard</text>
+      <text x="22" y="192" fill="#d9a95b">C4</text><text x="52" y="192" fill="#f4efe6">trace_monitor</text>
+    </g>
+    <text class="sans" x="22" y="240" font-size="13.5" fill="#a59b8c">19 checkers. Rules none</text>
+    <text class="sans" x="22" y="260" font-size="13.5" fill="#a59b8c">cover go to Claude review.</text>
+  </g>
+
+  <!-- branches -->
+  <path class="flow" d="M870 210 C900 210, 895 105, 924 105" marker-end="url(#arrow)"/>
+  <path class="flow" d="M870 210 H924" marker-end="url(#arrow)"/>
+  <path class="flow" d="M870 210 C900 210, 895 315, 924 315" marker-end="url(#arrow)"/>
+
+  <!-- 4. enforced at three points -->
+  <g class="sans">
+    <g transform="translate(930 62)" filter="url(#shadow)">
+      <rect class="card" width="236" height="86" rx="14"/>
+      <text class="step" x="20" y="30">WHILE THE AGENT WORKS</text>
+      <text x="20" y="56" font-size="16" fill="#1d1b19" font-weight="600">Claude Code hooks · MCP</text>
+      <text x="20" y="75" font-size="13" fill="#5c544a">refused before it runs</text>
+    </g>
+    <g transform="translate(930 167)" filter="url(#shadow)">
+      <rect class="card" width="236" height="86" rx="14"/>
+      <text class="step" x="20" y="30">AT COMMIT AND PUSH</text>
+      <text x="20" y="56" font-size="16" fill="#1d1b19" font-weight="600">git hooks</text>
+      <text x="20" y="75" font-size="13" fill="#5c544a">any agent, or a human</text>
+    </g>
+    <g transform="translate(930 272)" filter="url(#shadow)">
+      <rect class="card" width="236" height="86" rx="14"/>
+      <text class="step" x="20" y="30">ON EVERY PULL REQUEST</text>
+      <text x="20" y="56" font-size="16" fill="#1d1b19" font-weight="600">GitHub Action</text>
+      <text x="20" y="75" font-size="13" fill="#5c544a">base commit's rules, line comments</text>
+    </g>
+  </g>
+</svg>

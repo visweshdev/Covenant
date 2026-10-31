@@ -1,13 +1,13 @@
-<p align="center"><img src="logo.png" width="72" alt="Covenant logo"></p>
+<p align="center"><img src="assets/banner.svg" width="100%" alt="Covenant: rules for coding agents that actually hold"></p>
 
-<h1 align="center">Covenant docs</h1>
+<h1 align="center">Docs</h1>
 
 <p align="center"><a href="../README.md">← Back to the README</a></p>
 
----
-
 New here? Start with the [quick start](../README.md#quick-start): two commands in a repo and
 the rules are enforced.
+
+<p align="center"><img src="assets/how-it-works.svg" width="100%" alt="How Covenant works: plain English, compiled to typed rules, enforced while the agent works, at commit and push, and on every pull request"></p>
 
 ## Guides
 
