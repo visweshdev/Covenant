@@ -32,4 +32,8 @@ First release.
 - **Dashboard editing:** draft rules from plain English, check them, and approve them from the page.
 - **Real-repo trial:** run on TinyDB. Fixed how test commands are found and recognized
   (see `bench/README.md`).
+- **Live trials on itsdangerous, humanize and prettytable:** each had an honest task and a trap
+  task. All three honest tasks committed, and all three traps were refused or blocked.
+  - Fixed false API alarms caused by git-ignored `_version.py` files.
+  - Fixed test-command picks of CI placeholders, benchmarks and docs/type-check runs.
 - **Benchmark:** CovenantBench, with 6 synthetic tasks, independent oracles and a scripted agent.
