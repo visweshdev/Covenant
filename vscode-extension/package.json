@@ -2,7 +2,7 @@
   "name": "covenant",
   "displayName": "Covenant",
   "description": "See and manage the rules Covenant enforces on coding agents: live violations, protected files, approvals.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "icon": "media/icon.png",
   "publisher": "covenant",

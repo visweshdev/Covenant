@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 (2026-10-31)
+
+First published release; 0.1.0 was tagged but never published, because its tests failed on
+GitHub's Linux and Windows machines.
+
+- Restore points work where no git name or email is set (CI, containers).
+- The benchmark runner finds Git's bash on Windows instead of the WSL launcher.
+- Failing tests show up as annotations on the GitHub Actions page.
+- The logo appears on PyPI, the VS Code Marketplace page, PR comments and Slack alerts.
+
 ## 0.1.0 (2026-10-31)
 
 First release.

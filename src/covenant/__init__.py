@@ -3,4 +3,4 @@
 from .ir import Clause, ClauseKind, ClauseStatus, Covenant, Goal, OnViolation
 
 __all__ = ["Clause", "ClauseKind", "ClauseStatus", "Covenant", "Goal", "OnViolation"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
