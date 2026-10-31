@@ -156,7 +156,10 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
                 if cmd.startswith("run:"):
                     cmd = cmd[4:].strip()
                 cmd = cmd.strip("'\"|> ").strip()
-                if cmd and TEST_RUNNERS.search(cmd) and not cmd.startswith(("#", "-", "name:", "uses:")):
+                # `${{ matrix.x }}` is filled in by GitHub Actions; such a command can't run here.
+                # A `{...}`/`[...]` line is a YAML value (a matrix entry), not a command.
+                if (cmd and TEST_RUNNERS.search(cmd) and not cmd.startswith(("#", "-", "name:", "uses:", "{", "["))
+                        and "${{" not in cmd):
                     found.append((cmd, f".github/workflows/{wf.name}"))
     makefile = root / "Makefile"
     if makefile.is_file() and re.search(r"^test\s*:", makefile.read_text(encoding="utf-8", errors="ignore"), re.M):
@@ -189,7 +192,8 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
     return sorted(unique.items(), key=lambda item: (_side_check(item[0]), not _runnable(item[0])))
 
 
-_SIDE_CHECKS = re.compile(r"--mypy|\bmypy\b|\bpyright\b|\bruff\b|\bflake8\b|\blint\b|\bcoveralls\b|--collect-only|\bbenchmark", re.I)
+_SIDE_CHECKS = re.compile(r"--mypy|\bmypy\b|\bpyright\b|\bruff\b|\bflake8\b|\blint\b|\bcoveralls\b|--collect-only|benchmark|codspeed|"
+    r"\b(?:tox|nox)\b.*\s-[es]\s*(?:typing|types?|mypy|docs?|lint|style|format\w*|pre-?commit|check)\b", re.I)
 
 
 def _side_check(cmd: str) -> bool:

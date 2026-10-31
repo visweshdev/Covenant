@@ -395,3 +395,24 @@ def test_rules_without_specifics_ask(mylib_repo):
     cov = compile_instruction("Fix the bug. Keep the change small. Only edit the files you need", mylib_repo,
                               HeuristicExtractor()).covenant
     assert [c.status for c in cov.clauses] == [ClauseStatus.PENDING_CLARIFICATION] * 2
+
+
+def test_ci_templates_matrix_values_and_side_environments_are_not_the_suite(tmp_path, monkeypatch):
+    """From real repos (itsdangerous, humanize, prettytable)."""
+    import shutil
+
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text(
+        "jobs:\n  t:\n    strategy:\n      matrix:\n        include:\n"
+        "          - {name: PyPy, python: 'pypy-3.11', tox: pypy311}\n"
+        "    steps:\n      - run: uv run --locked tox run -e ${{ matrix.tox }}\n"
+        "      - run: uvx --with tox-uv tox -e docs\n"
+        "      - run: uv run tox run -e typing\n"
+        "      - run: pytest tests/test_benchmarks.py --codspeed\n"
+    )
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}")
+    cmds = [c for c, _ in ground(tmp_path).test_commands]
+    assert cmds[0] == "python -m pytest -q"
+    assert not [c for c in cmds if "${{" in c or c.startswith("{")]
