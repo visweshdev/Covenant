@@ -26,13 +26,16 @@ from ..feedback import ViolationReport
 from ..monitors.effects import normalize_path
 from ..paths import control_paths, is_under
 from ..runtime import Decision, Runtime
-from .. import testcmd
+from .. import snapshots, testcmd
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Claude Code on Windows also has a PowerShell tool; it must get the same checks as Bash.
 SHELL_TOOLS = {"Bash", "PowerShell"}
 SHELL_MATCHER = "|".join(sorted(SHELL_TOOLS))
+WEB_TOOLS = {"WebFetch", "WebSearch"}
 TOOL_MATCHER = f"{SHELL_MATCHER}|Write|Edit|MultiEdit|NotebookEdit"
+# Before a tool runs, web and MCP tools are checked too (network, SQL and budget rules).
+PRE_MATCHER = f"{TOOL_MATCHER}|WebFetch|WebSearch|mcp__.*"
 MAX_REASON = 9000
 
 # `git [global options] commit|push`, anywhere in a compound command.
@@ -64,6 +67,8 @@ class ClaudeCodeHook:
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
         event = payload.get("hook_event_name")
+        if "covenant_agent" in payload:  # set by the hook client from the agent's environment
+            self.rt.agent = str(payload.get("covenant_agent") or "")
         handler = {
             "SessionStart": self.session_start,
             "PreToolUse": self.pre_tool_use,
@@ -101,15 +106,45 @@ class ClaudeCodeHook:
             path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
             if path and is_under(path, self.controls):
                 return self._deny(f"Covenant: {path} belongs to Covenant's own setup and can't be changed by the agent.")
+        if tool in FILE_TOOLS | SHELL_TOOLS | WEB_TOOLS or tool.startswith("mcp__"):
+            reports = self.rt.budget_reports(payload.get("transcript_path"), count=False)
+            if reports:
+                return self._refuse("Covenant: this task's budget is used up", reports)
+        denied = self._pre_tool_checks(tool, tool_input)
+        if denied is not None:
+            return denied
+        self.rt.budget_reports(payload.get("transcript_path"), count=True)  # count the allowed action
+        self._snapshot_if_risky(tool, tool_input)
+        return {}
+
+    def _snapshot_if_risky(self, tool: str, tool_input: dict[str, Any]) -> None:
+        """A restore point before a step that can delete or overwrite files (see covenant.snapshots)."""
+        if not self.rt.has_session:
+            return
+        label = None
+        if tool in SHELL_TOOLS and snapshots.RISKY.search(tool_input.get("command", "")):
+            label = f"before: {tool_input.get('command', '')[:150]}"
+        elif tool == "Write" and Path(tool_input.get("file_path") or "").is_file():
+            label = f"before rewriting {normalize_path(tool_input['file_path'], self.rt.repo_root)}"
+        if label:
+            snapshots.maybe_take(self.rt.repo_root, self.rt.state_dir, label)
+
+    def _pre_tool_checks(self, tool: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
+        """The deny response for a tool call that breaks a rule, or None to allow it."""
+        if tool in WEB_TOOLS or tool.startswith("mcp__"):
+            reports = self.rt.tool_reports(tool, tool_input)
+            return self._refuse("Covenant refused this tool call", reports) if reports else None
+        if tool in FILE_TOOLS:
+            path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
             if path and Path(path).exists():
                 reports = self.rt.would_violate(Effect(op="overwrite", target=path))
                 if reports:
-                    return self._deny(self._render("Covenant denied this edit", reports))
+                    return self._refuse("Covenant denied this edit", reports)
             if path:
                 reports = self.rt.scope_reports(path)
                 if reports:
-                    return self._deny(self._render("Covenant denied this edit", reports))
-            return {}
+                    return self._refuse("Covenant denied this edit", reports)
+            return None
         if tool in SHELL_TOOLS:
             command = tool_input.get("command", "")
             if _BYPASS.search(command):
@@ -118,12 +153,13 @@ class ClaudeCodeHook:
                 return self._deny("Covenant: this command would modify Covenant's own files, which only a human can change.")
             reports = self.rt.command_reports(command)
             if reports:
-                return self._deny(self._render("Covenant refused this command", reports))
+                return self._refuse("Covenant refused this command", reports)
             for action in git_actions(command):
                 decision = self.rt.record(Commit() if action == "commit" else Push(), dry_run=True)
                 if not decision.allowed:
+                    # record() already logged this decision (and alerted, if that's set up)
                     return self._deny(self._render(f"Covenant blocked git {action}", decision.blocking))
-        return {}
+        return None
 
     def post_tool_use(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._after_tool(payload, succeeded=True)
@@ -202,6 +238,12 @@ class ClaudeCodeHook:
             lines.append(f"Run tests with exactly {cmds}, on its own (no pipes or `||`), so Covenant records the result.")
         lines.append("If Covenant blocks something, read its report: it names the rule, the evidence and how to fix it.")
         return "\n".join(lines)
+
+    def _refuse(self, header: str, reports: list[ViolationReport]) -> dict[str, Any]:
+        """Deny a tool call that breaks a rule, and record it (for `covenant explain`, the
+        dashboard and alerts)."""
+        self.rt.log_refusal(header, reports)
+        return self._deny(self._render(header, reports))
 
     @staticmethod
     def _deny(reason: str) -> dict[str, Any]:
@@ -322,7 +364,7 @@ def install(repo: Path, settings_file: Path, state_dir: Path | None = None, on_f
     hooks = data.setdefault("hooks", {})
     plan = [
         ("SessionStart", None),
-        ("PreToolUse", TOOL_MATCHER),
+        ("PreToolUse", PRE_MATCHER),
         ("PostToolUse", TOOL_MATCHER),
         ("PostToolUseFailure", SHELL_MATCHER),
         ("Stop", None),

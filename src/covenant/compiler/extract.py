@@ -222,12 +222,27 @@ _SPLIT = re.compile(
 )
 _PATHS = re.compile(r"(?:~|\.)?[\w.-]*/[\w./*-]*|\b[\w-]+\.(?:py|ts|tsx|js|json|ya?ml|toml|db|sqlite3?|md|lock|cfg|ini|env)\b")
 
+_TLD = r"(?:com|org|net|io|dev|ai|co|app|cloud|sh|gov|edu|me|xyz|info|so|us|uk|de|in)"
+HOSTS = re.compile(rf"\b((?:[a-z0-9-]+\.)+{_TLD})\b", re.I)
+
 _RULES: list[tuple[Intent, re.Pattern[str]]] = [
     # Checked first: these phrasings also look like the older, broader rules below.
+    (Intent.BUDGET, re.compile(
+        r"\$\s*\d|\b\d+(?:\.\d+)?\s*(?:dollars|usd)\b|\bbudget\b|\btime\s+limit\b|"
+        r"\b(?:stop|finish|done|wrap\s+up|end)\w*\b.*\b(?:after|within|in|by)\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)\b|"
+        r"\b(?:at most|no more than|max(?:imum)?(?: of)?|under|fewer than|less than)\s+\d+\s+(?:tool\s+calls|actions|agent\s+steps)\b|"
+        r"\b(?:spend|cost)\w*\b.*\b(?:at most|no more than|under|less than)\b", re.I)),
+    (Intent.PATH_OWNERSHIP, re.compile(
+        r"\bonly\s+(?:the\s+)?[\w-]+(?:\s+team(?:'s)?)?\s+(?:agents?|team|bots?)\b.*\b(?:edit|change|touch|modify|write|own)\w*", re.I)),
+    (Intent.NETWORK_ALLOWLIST, re.compile(
+        rf"\b(?:only|just)\b.*\b(?:reach|access|connect\w*|talk\w*\s+to|call|contact|fetch\w*|download\w*|network)\b.*\b(?:[a-z0-9-]+\.)+{_TLD}\b|"
+        rf"\bnetwork\b.*\b(?:only|just)\b.*\b(?:[a-z0-9-]+\.)+{_TLD}\b", re.I)),
     (Intent.FORBIDDEN_COMMANDS, re.compile(
         rf"{_NEG}.*\b(force[ -]?push\w*|push\s+--force|push\s+-f\b|rewrite\w*\s+(?:git\s+)?history|rebase|amend|reset\s+--hard|"
         r"sudo|rm\s+-rf|curl|wget|deploy\w*|publish\w*|kubectl|terraform|install\w*\s+(?:any\s+)?(?:new\s+)?(?:packages?|deps|dependenc\w*|librar\w*|anything)|"
-        r"network|internet|go\s+online|delete\s+(?:any\s+)?branch\w*|kill\w*|discard\w*|database\s+(?:shell|cli|directly)|system\s+settings)|"
+        r"network|internet|go\s+online|delete\s+(?:any\s+)?branch\w*|kill\w*|discard\w*|database\s+(?:shell|cli|directly)|system\s+settings|"
+        r"pipe\w*|destructive\s+sql|(?:raw\s+)?sql\b|drop\s+(?:any\s+)?(?:tables?|databases?)\s+(?:directly|in\s+(?:the\s+)?(?:database|db))|"
+        r"truncat\w*\s+(?:any\s+)?tables?)|"
         rf"{_NEG}.*\b(read|open|look\s+at|access|cat|print|show)\b.*(\.env\b|\bsecrets?\b|\bcredentials?\b|\bssh\b)", re.I)),
     (Intent.NO_SECRETS, re.compile(
         rf"(?:{_NEG}|\bkeep\b|\bhard-?cod).*\b(secrets?|credentials?|api[ -]?keys?|tokens?|passwords?)\b|(?:{_NEG}|\bkeep\b).*\.env\b", re.I)),

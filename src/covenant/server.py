@@ -57,7 +57,8 @@ class HookServer(ThreadingHTTPServer):
             raise ValueError(f"no covenant.yaml in {repo}")
         self.repo, self.covenant, self.state_dir_arg = repo, covenant, state_dir
         self.state_dir = runtime.state_dir
-        self.token = ensure_token(self.state_dir)
+        # The sandbox hands the server its token, so it can write the agent's settings beforehand.
+        self.token = os.environ.get("COVENANT_HOOK_TOKEN") or ensure_token(self.state_dir)
 
         self.last_request = time.monotonic()
         self.code_stamp = code_stamp()
@@ -211,12 +212,14 @@ def git_hook_script(name: str, url: str, token: str) -> str:
 
 def http_hooks_settings(url: str, token: str) -> dict[str, Any]:
     """Claude Code settings that send every hook event to the server."""
+    from .integrations.claude_code import PRE_MATCHER, TOOL_MATCHER
+
     handler = {"type": "http", "url": f"{url}/hook", "headers": {"Authorization": f"Bearer {token}"}, "timeout": 300}
-    matcher = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit"
+    matcher = TOOL_MATCHER
     return {
         "hooks": {
             "SessionStart": [{"hooks": [handler]}],
-            "PreToolUse": [{"matcher": matcher, "hooks": [handler]}],
+            "PreToolUse": [{"matcher": PRE_MATCHER, "hooks": [handler]}],
             "PostToolUse": [{"matcher": matcher, "hooks": [handler]}],
             "PostToolUseFailure": [{"matcher": "Bash|PowerShell", "hooks": [handler]}],
             "Stop": [{"hooks": [handler]}],

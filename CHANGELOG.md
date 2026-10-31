@@ -32,6 +32,20 @@ First release.
 - **Dashboard editing:** draft rules from plain English, check them, and approve them from the page.
 - **Real-repo trial:** run on TinyDB. Fixed how test commands are found and recognized
   (see `bench/README.md`).
+- **Rule packs:** `covenant compile --pack safe-refactor|dependency-bump|docs-only|hotfix|data-safe|secure|lockdown`.
+- **Destructive SQL guard:** refuses DROP, TRUNCATE and unqualified DELETE/UPDATE for Postgres,
+  MySQL, SQLite and others, in commands, `.sql` files and database MCP tools.
+- **Network allowlist, path ownership and budgets:** "only reach pypi.org", "only the payments
+  agent may edit billing/", "stop after 20 minutes", "spend at most $2", "at most 50 tool calls".
+- **Undo snapshots:** restore points before risky steps; `covenant snapshots` and `covenant undo`.
+- **Team policies from a URL**, optionally pinned by sha256, with an offline copy.
+- **Alerts** to Slack, a webhook or email when an agent needs a human.
+- **`covenant explain`** and **`covenant suggest`** (rules learned from the repo's history).
+- **GitHub PR comments** on the exact broken lines plus one summary comment, from the action.
+- **Dashboard replay** of the current and past tasks, step by step.
+- **Sandbox mode** (`covenant sandbox`): Docker containers with an allowlist proxy and the
+  task's state out of the agent's reach.
+- **Installers and a release workflow** for PyPI and the VS Code Marketplace.
 - **Live trials on itsdangerous, humanize and prettytable:** each had an honest task and a trap
   task. All three honest tasks committed, and all three traps were refused or blocked.
   - Fixed false API alarms caused by git-ignored `_version.py` files.

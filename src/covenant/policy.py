@@ -14,6 +14,8 @@ A policy file holds clauses like covenant.yaml does:
 
 A repo opts in with `extends: [path/to/policy.yaml]` in covenant.yaml. A machine can impose
 policies on every repo with COVENANT_POLICY (paths separated by the OS path separator).
+A policy can also live at an https URL (a raw file in an org-wide repo, say), optionally
+pinned: `extends: ["https://example.com/policy.yaml#sha256=<hex>"]`. See `fetch`.
 
 Policy clauses come first, carry an `origin`, and can't be redefined by the repo: a clashing
 id is an error, not an override. Policy files count as Covenant's own files, so editing one
@@ -27,6 +29,7 @@ import os
 import posixpath
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urljoin
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,8 +60,61 @@ def _unwrap(text: str, what: str) -> dict:
     return data
 
 
+MAX_POLICY_BYTES = 1_000_000
+
+
+def is_url(ref: str) -> bool:
+    return ref.startswith(("https://", "http://"))
+
+
+def fetch(url: str, opener: Callable[[str], bytes] | None = None) -> str:
+    """Download a policy from a URL into ~/.covenant/policies/ and return the local copy's path.
+
+    Pin a policy to exact contents with `#sha256=<hex>` at the end of the URL; a mismatch is an
+    error. When the network is down the last good copy is used, unless it no longer matches
+    the pin. Plain http is refused except for localhost.
+    """
+    from urllib.parse import urlparse
+
+    from .paths import covenant_home
+
+    address, _, fragment = url.partition("#")
+    pin = fragment.removeprefix("sha256=").lower() if fragment.startswith("sha256=") else None
+    host = urlparse(address).hostname or ""
+    if address.startswith("http://") and host not in ("localhost", "127.0.0.1", "::1"):
+        raise PolicyError(f"policy URLs must use https: {address}")
+    cache = covenant_home() / "policies" / (hashlib.sha256(address.encode()).hexdigest()[:20] + ".yaml")
+
+    def download(u: str) -> bytes:
+        import urllib.request
+
+        with urllib.request.urlopen(u, timeout=15) as response:  # noqa: S310 (https checked above)
+            return response.read(MAX_POLICY_BYTES + 1)
+
+    try:
+        data = (opener or download)(address)
+        if len(data) > MAX_POLICY_BYTES:
+            raise PolicyError(f"policy at {address} is larger than 1 MB")
+    except PolicyError:
+        raise
+    except Exception as exc:
+        if not cache.is_file():
+            raise PolicyError(f"can't download policy {address}: {exc}") from exc
+        data = cache.read_bytes()  # offline: the last good copy
+    if pin and hashlib.sha256(data).hexdigest() != pin:
+        raise PolicyError(f"policy at {address} doesn't match its pinned sha256; someone changed it")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    if not cache.is_file() or cache.read_bytes() != data:
+        cache.write_bytes(data)
+    return str(cache)
+
+
 def machine_policies() -> list[str]:
-    return [p for p in os.environ.get(POLICY_ENV, "").split(os.pathsep) if p.strip()]
+    import re
+
+    # Split on the path separator, but not the ':' in "https://".
+    parts = re.split(re.escape(os.pathsep) + ("(?!//)" if os.pathsep == ":" else ""), os.environ.get(POLICY_ENV, ""))
+    return [p for p in parts if p.strip()]
 
 
 def _join(base: str, ref: str) -> str:
@@ -80,23 +136,31 @@ def resolve(covenant: Covenant, read: Reader, base: str, include_machine: bool =
     used: list[str] = []
 
     def visit(ref: str, base_dir: str, chain: list[str]) -> None:
-        path = _join(base_dir, ref)
-        if path in chain:
-            raise PolicyError(f"policies extend each other in a loop: {' -> '.join(chain + [path])}")
+        if is_url(ref) or is_url(base_dir):
+            key = ref if is_url(ref) else urljoin(base_dir.rstrip("/") + "/", ref)
+            path = fetch(key)  # a local cached copy; that file is what gets hashed and guarded
+            parent = key.split("#", 1)[0].rsplit("/", 1)[0]
+            text = disk_reader(path)
+        else:
+            path = key = _join(base_dir, ref)
+            parent = os.path.dirname(path) if os.path.isabs(path) else posixpath.dirname(path)
+            text = None
+        if key in chain:
+            raise PolicyError(f"policies extend each other in a loop: {' -> '.join(chain + [key])}")
         if path in used:
             return
-        text = read(path)
+        if text is None:
+            text = read(path)
         if text is None:
             raise PolicyError(f"policy file not found: {path}")
         try:
-            policy = Policy.model_validate(_unwrap(text, path))
+            policy = Policy.model_validate(_unwrap(text, key))
         except ValueError as exc:
-            raise PolicyError(f"invalid policy {path}: {exc}") from exc
-        parent = os.path.dirname(path) if os.path.isabs(path) else posixpath.dirname(path)
+            raise PolicyError(f"invalid policy {key}: {exc}") from exc
         for sub in policy.extends:
-            visit(sub, parent, chain + [path])
+            visit(sub, parent, chain + [key])
         used.append(path)
-        merged.extend(c.model_copy(update={"origin": f"{policy.name} ({path})"}) for c in policy.clauses)
+        merged.extend(c.model_copy(update={"origin": f"{policy.name} ({key})"}) for c in policy.clauses)
 
     refs = list(covenant.extends) + (machine_policies() if include_machine else [])
     for ref in refs:

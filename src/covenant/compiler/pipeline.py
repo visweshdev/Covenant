@@ -84,15 +84,32 @@ def compile_instruction(
     answers: dict[str, int] | None = None,
     max_questions: int = 3,
     review: bool = False,
+    packs: list[str] | None = None,
 ) -> CompileResult:
+    from .. import packs as rule_packs
+    from .extract import HeuristicExtractor
+
     instruction = instruction.strip()
+    chosen = [rule_packs.get(name) for name in packs or []]
+    if not instruction and chosen:
+        instruction = f"Work on a {chosen[0].name} task"
+        extractor = HeuristicExtractor()  # nothing for Claude to read
     if not instruction:
         raise CompileError("the instruction is empty")
     facts = ground(repo)
     extraction = extractor(instruction, facts)
     issues = check_spans(instruction, extraction)
 
-    clauses = Binder(facts, review=review).bind_all(extraction.clauses)
+    binder = Binder(facts, review=review)
+    clauses = binder.bind_all(extraction.clauses)
+    for pack in chosen:  # packs always compile offline, so a pack means the same rules everywhere
+        pack_extraction = HeuristicExtractor()(pack.text, facts)
+        for clause in binder.bind_all(pack_extraction.clauses):
+            if any(c.checker == clause.checker and c.params == clause.params for c in clauses):
+                continue  # the instruction already says this
+            clauses.append(clause.model_copy(update={"assumptions": clause.assumptions + [f"from rule pack {pack.name}"]}))
+    for n, clause in enumerate(clauses, 1):  # ids stay C1, C2, ... after duplicates are dropped
+        clause.id = f"C{n}"
     questions = find_questions(clauses, facts)
     by_id = {c.id: c for c in clauses}
     result_asked, result_defaulted = [], []
@@ -111,6 +128,8 @@ def compile_instruction(
             result_defaulted.append(q)
 
     goal_paths = [p for p in re.findall(r"[\w.-]+/[\w./*-]*|\b[\w-]+\.(?:toml|lock|json|ya?ml|txt|cfg)\b", extraction.goal_span)]
+    if chosen:
+        instruction += "".join(f"\n[rule pack {p.name}] {p.text}" for p in chosen)
     covenant = Covenant(
         instruction=instruction,
         goal=Goal(action=extraction.goal_action, scope=goal_paths),

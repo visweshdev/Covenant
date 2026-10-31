@@ -252,6 +252,48 @@ class Binder:
                 confidence=0.85,
             )]
 
+        if intent is Intent.NETWORK_ALLOWLIST:
+            hosts = list(dict.fromkeys(
+                [p.lower() for p in c.paths if _HOSTS.fullmatch(p)] + [h.lower() for h in _HOSTS.findall(c.source_span)]))
+            hosts = [h for h in hosts if not h.endswith(_FILE_SUFFIXES)]
+            if not hosts:
+                return [self._unenforceable(c, ClauseKind.EFFECT_PROHIBITION, "no host names found to allow")]
+            return [Clause(
+                id=self._id(), kind=ClauseKind.EFFECT_PROHIBITION, source_span=c.source_span,
+                scope=[f"network access except {', '.join(hosts)}"], checker="command_guard",
+                params={"deny": ["network"], "allow_hosts": hosts},
+                assumptions=[f"only {', '.join(hosts)} (and their subdomains) may be reached; package installs need their registry listed"],
+                confidence=0.8,
+            )]
+
+        if intent is Intent.PATH_OWNERSHIP:
+            owner = next((p.split(":", 1)[1].strip().lower() for p in c.paths if p.lower().startswith("owner:")), None)
+            if owner is None:
+                m = re.search(r"\bonly\s+(?:the\s+)?([\w-]+)", c.source_span, re.I)
+                owner = m.group(1).lower() if m else None
+            paths = [_as_glob(p) for p in c.paths if not p.lower().startswith("owner:") and ("/" in p or "." in p)]
+            if not owner or not paths:
+                return [self._unenforceable(c, ClauseKind.SEMANTIC_INVARIANT, "couldn't tell which folder belongs to which agent")]
+            return [Clause(
+                id=self._id(), kind=ClauseKind.SEMANTIC_INVARIANT, source_span=c.source_span,
+                scope=paths, checker="path_owner", params={"owners": {p: [owner] for p in paths}, "baseline": "HEAD"},
+                assumptions=[f"{', '.join(paths)} belong to {owner}; an agent says who it is with COVENANT_AGENT={owner}"],
+                confidence=0.8,
+            )]
+
+        if intent is Intent.BUDGET:
+            params = _budget(c.source_span)
+            if not params:
+                return [self._unenforceable(c, ClauseKind.EFFECT_PROHIBITION, "couldn't read a time, action or cost limit")]
+            what = {"max_minutes": "{} minutes", "max_actions": "{} actions", "max_cost_usd": "${} (estimated at API prices)"}
+            return [Clause(
+                id=self._id(), kind=ClauseKind.EFFECT_PROHIBITION, source_span=c.source_span,
+                scope=["the whole task"], checker="budget", params=params,
+                assumptions=["limit: " + ", ".join(what[k].format(v) for k, v in params.items())]
+                + (["actions = edits, shell commands, web and MCP calls (not reads or searches)"] if "max_actions" in params else []),
+                confidence=0.85,
+            )]
+
         if intent is Intent.NO_DESTRUCTIVE_MIGRATIONS:
             dirs = facts.migration_dirs or ["migrations", "alembic/versions", "prisma/migrations", "db/migrate"]
             return [Clause(
@@ -304,6 +346,7 @@ COMMAND_WORDS: list[tuple[str, str]] = [
     ("database_cli", r"database\s+(?:shell|cli|directly)|\bpsql\b|\bmysql\b"),
     ("kill_processes", r"\bkill|terminat\w*\s+process|stop\w*\s+process"),
     ("system_changes", r"system\s+(?:settings|config\w*)|registry|\bchmod\b|crontab"),
+    ("destructive_sql", r"destructive\s+sql|\bsql\b|drop\s+(?:any\s+)?(?:tables?|databases?)|truncat"),
 ]
 CATEGORY_WORDS = {
     "force_push": "force pushes", "history_rewrite": "rewriting git history", "branch_delete": "deleting branches",
@@ -311,7 +354,28 @@ CATEGORY_WORDS = {
     "recursive_delete": "rm -rf outside the task", "install_packages": "installing packages", "publish": "publishing",
     "deploy": "deploying", "network": "network access", "read_secrets": "reading secret files",
     "database_cli": "database shells", "kill_processes": "killing processes", "system_changes": "system settings",
+    "destructive_sql": "destructive SQL (DROP, TRUNCATE, DELETE or UPDATE without WHERE)",
 }
+
+
+_HOSTS = re.compile(r"(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|ai|co|app|cloud|sh|gov|edu|me|xyz|info|so|us|uk|de|in)", re.I)
+_FILE_SUFFIXES = (".py", ".md", ".ts", ".js", ".json", ".yaml", ".yml", ".toml", ".sh")
+
+
+def _budget(span: str) -> dict:
+    params: dict = {}
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?)\b", span, re.I)
+    if m:
+        n = float(m.group(1)) * (60 if m.group(2).lower().startswith("h") else 1)
+        params["max_minutes"] = int(n) if n == int(n) else n
+    m = re.search(r"(\d+)\s+(?:tool\s+calls|actions|agent\s+steps)\b", span, re.I)
+    if m:
+        params["max_actions"] = int(m.group(1))
+    m = re.search(r"\$\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:dollars|usd)\b", span, re.I)
+    if m:
+        n = float(m.group(1) or m.group(2))
+        params["max_cost_usd"] = int(n) if n == int(n) else n
+    return params
 
 
 def _numbers(span: str, unit: str) -> int | None:

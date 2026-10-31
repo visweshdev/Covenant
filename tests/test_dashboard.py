@@ -124,3 +124,31 @@ def test_read_only_dashboard_refuses_changes(mylib_repo):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_history_keeps_past_sessions_and_replays_them(mylib_repo):
+    from covenant import dashboard
+    from covenant.events import Commit, Edit
+    from covenant.ir import Covenant
+    from covenant.runtime import Runtime
+
+    cov = Covenant.load(mylib_repo / "covenant.yaml")
+    rt = Runtime(cov, mylib_repo)
+    rt.start()
+    rt.record(Edit(path="mylib/core.py"))
+    assert not rt.record(Commit()).allowed  # blocked: no test run
+    rt.start()  # a new task: the old one is archived, not lost
+    ws = rt.state_dir.name
+    listed = dashboard.sessions(ws)
+    assert [s["id"] for s in listed][0] == "current" and len(listed) == 2
+    old = listed[1]
+    assert old["events"] == 1 and old["refused"] == 1
+    replay = dashboard.timeline(ws, old["id"])
+    kinds = [(s["kind"], s["type"]) for s in replay["steps"]]
+    assert kinds == [("event", "edit"), ("decision", "commit")]
+    blocked = replay["steps"][1]
+    assert blocked["allowed"] is False and blocked["rules"][0]["id"] == "C3"
+    assert "tests haven't passed" in blocked["rules"][0]["why"]
+    assert {r["id"] for r in replay["rules"]} >= {"C1", "C2", "C3"}
+    assert dashboard.timeline(ws, "../../etc") is None
+    assert dashboard.timeline(ws, "current")["steps"] == []

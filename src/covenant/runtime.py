@@ -32,9 +32,10 @@ from .locking import file_lock
 from .monitors.effects import EffectMonitor, normalize_path
 from .monitors.snapshot import CopySnapshotter
 from .monitors.trace import ATOMS, TraceMonitor
-from . import policy
+from . import alerts, policy
 from .paths import claude_settings_files, default_state_dir
-from .verifiers import api_surface, command_guard, dependency_diff, diff_guard, llm_review, schema_guard, source_api, sqlite_guard, ts_api_surface
+from .verifiers import (api_surface, budget, command_guard, dependency_diff, diff_guard, llm_review, ownership, schema_guard,
+                        source_api, sqlite_guard, ts_api_surface)
 from .verifiers.test_gate import run_tests
 
 SemanticVerifier = Callable[[Clause, Path, "str | None"], list[ViolationReport]]
@@ -44,8 +45,10 @@ SEMANTIC_VERIFIERS: dict[str, SemanticVerifier] = {
     "schema_guard": schema_guard.verify,
     "dependency_diff": dependency_diff.verify,
     "source_api_diff": source_api.verify,
+    "path_owner": ownership.verify,
     **diff_guard.VERIFIERS,
 }
+PRE_ACTION_CHECKERS = {"command_guard", "budget"}  # judged before an action, not as file effects
 MISSING = "<missing>"
 
 
@@ -104,6 +107,7 @@ class Runtime:
         self.state_dir = Path(state_dir).resolve() if state_dir else default_state_dir(self.repo_root)
         self.covenant_path = Path(covenant_path).resolve() if covenant_path else self.repo_root / "covenant.yaml"
         self.escalate_after = escalate_after
+        self.agent: str | None = None  # who is acting (COVENANT_AGENT); None = this process's environment
         self._configure(covenant)
         with self._lock():
             self._load_state()
@@ -133,8 +137,9 @@ class Runtime:
     def _configure(self, covenant: Covenant) -> None:
         self.covenant = covenant
         effects = covenant.enforced(ClauseKind.EFFECT_PROHIBITION)
-        self.effect_monitors = [EffectMonitor(c, self.repo_root) for c in effects if c.checker != "command_guard"]
+        self.effect_monitors = [EffectMonitor(c, self.repo_root) for c in effects if c.checker not in PRE_ACTION_CHECKERS]
         self.command_clauses = [c for c in effects if c.checker == "command_guard"]
+        self.budget_clauses = [c for c in effects if c.checker == "budget"]
         self.semantic_clauses = covenant.enforced(ClauseKind.SEMANTIC_INVARIANT)
         self.sqlite_clauses = [c for c in self.semantic_clauses if c.checker == "sqlite_guard"]
 
@@ -195,6 +200,7 @@ class Runtime:
                 merged, policy_files = policy.load(self.covenant_path)
                 self._configure(merged)
                 merged.dump(self.approved_path)  # team policies merged in; edits to the sources don't count
+            self._archive_session()
             for name in ("trace.jsonl", "reports.jsonl"):
                 (self.state_dir / name).unlink(missing_ok=True)
             self._fresh_monitors()
@@ -221,6 +227,24 @@ class Runtime:
             }
             self._write_session()
             return self.session
+
+    def _archive_session(self, keep: int = 30) -> None:
+        """Keep the finished session's record (for the dashboard's history) before starting anew."""
+        session_file = self.state_dir / "session.json"
+        if not session_file.is_file() or not (self.state_dir / "trace.jsonl").exists() and not (self.state_dir / "reports.jsonl").exists():
+            return
+        try:
+            started = json.loads(session_file.read_text(encoding="utf-8")).get("started_at") or "unknown"
+        except ValueError:
+            started = "unknown"
+        folder = self.state_dir / "history" / re.sub(r"[^\w.-]", "-", started)[:40]
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in ("session.json", "trace.jsonl", "reports.jsonl", "covenant.approved.yaml"):
+            if (self.state_dir / name).is_file():
+                shutil.copy2(self.state_dir / name, folder / name)
+        old = sorted((self.state_dir / "history").iterdir())
+        for stale in old[:-keep]:
+            shutil.rmtree(stale, ignore_errors=True)
 
     def amend(self) -> list[str]:
         """Approve new rules mid-task. They apply from now on; the trace, snapshots and
@@ -361,16 +385,44 @@ class Runtime:
 
     def command_reports(self, command: str) -> list[ViolationReport]:
         """Reports for a shell command that is about to run (command_guard rules)."""
-        return [r for c in self.command_clauses for r in command_guard.check(c, command)]
+        return [r for c in self.command_clauses for r in command_guard.check(c, command, self.repo_root)]
+
+    def tool_reports(self, tool: str, tool_input: dict[str, Any]) -> list[ViolationReport]:
+        """Reports for a web or database tool call that is about to run (command_guard rules)."""
+        return [r for c in self.command_clauses for r in command_guard.check_tool(c, tool, tool_input)]
+
+    def budget_reports(self, transcript: str | None = None, count: bool = True) -> list[ViolationReport]:
+        """Limits already used up, judged before an action. With `count`, the action is counted
+        (only when allowed, so refused attempts don't use up the budget)."""
+        if not self.budget_clauses:
+            return []
+        with self._lock():
+            self._load_state()
+            actions = int(self.session.get("actions", 0))
+            reports = [r for c in self.budget_clauses
+                       for r in budget.check(c, self.session.get("started_at"), actions, transcript)]
+            if count and not reports and self.session:
+                self.session["actions"] = actions + 1
+                self._write_session()
+            return reports
+
+    def budget_usage(self, transcript: str | None = None) -> dict[str, Any]:
+        return {c.id: budget.usage(c, self.session.get("started_at"), int(self.session.get("actions", 0)), transcript)
+                for c in self.budget_clauses}
 
     def scope_reports(self, path: str) -> list[ViolationReport]:
-        """Reports for a file edit that is about to happen outside the allowed files (scope_guard)."""
+        """Reports for a file edit that is about to happen outside the allowed files (scope_guard)
+        or in a folder another agent owns (path_owner)."""
         rel = normalize_path(path, self.repo_root)
         if rel.startswith(("~", "/")) or re.match(r"^[A-Za-z]:", rel):
             return []  # outside the repo; Covenant's own files are guarded separately
-        return [ViolationReport.for_clause(c, {"op": "edit", "target": rel},
-                                           hints=[f"Only {', '.join(c.params.get('allow', []))} may change in this task"])
-                for c in self.semantic_clauses if c.checker == "scope_guard" and not diff_guard.scope_allows(c, rel)]
+        reports = [ViolationReport.for_clause(c, {"op": "edit", "target": rel},
+                                              hints=[f"Only {', '.join(c.params.get('allow', []))} may change in this task"])
+                   for c in self.semantic_clauses if c.checker == "scope_guard" and not diff_guard.scope_allows(c, rel)]
+        for c in self.semantic_clauses:
+            if c.checker == "path_owner":
+                reports += ownership.check_path(c, rel, self.agent)
+        return reports
 
     def would_violate(self, effect: Effect) -> list[ViolationReport]:
         """Reports for an effect that has not happened yet, so it can be denied up front."""
@@ -528,7 +580,13 @@ class Runtime:
             if verifier is None:
                 continue
             try:
-                reports += verifier(clause, self.repo_root, baselines.get(clause.id))
+                if clause.checker == "path_owner":  # judged for the acting agent, not this process
+                    base = baselines.get(clause.id) or clause.params.get("baseline", "HEAD")
+                    reports += [r for ch in diff_guard.changes(self.repo_root, base)
+                                for p in {ch.path, ch.old_path} - {None}
+                                for r in ownership.check_path(clause, p, self.agent)]
+                else:
+                    reports += verifier(clause, self.repo_root, baselines.get(clause.id))
             except Exception as exc:  # a verifier that cannot run fails closed
                 reports.append(
                     ViolationReport.for_clause(
@@ -538,6 +596,19 @@ class Runtime:
                     )
                 )
         return reports
+
+    def log_refusal(self, what: str, reports: list[ViolationReport]) -> None:
+        """Record a tool call refused before it ran. It doesn't count toward handing over to a
+        human (those counts are for repeated commits and pushes), but it is logged and alerted."""
+        if not reports:
+            return
+        with self._lock():
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            entry = {"ts": datetime.now(timezone.utc).isoformat(), "counted": [],
+                     **Decision(f"refused: {what.removeprefix('Covenant ').removeprefix('Covenant: ')}", False, reports).to_dict()}
+            with (self.state_dir / "reports.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        alerts.send(self.repo_root, self.state_dir, "denied", reports)
 
     def _log(self, decision: Decision) -> None:
         if not decision.reports:
@@ -552,3 +623,7 @@ class Runtime:
         entry = {"ts": datetime.now(timezone.utc).isoformat(), "counted": counted, **decision.to_dict()}
         with (self.state_dir / "reports.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+        blocking = decision.blocking
+        if blocking:
+            human = any(r.escalated or r.on_violation is OnViolation.ASK_HUMAN for r in blocking)
+            alerts.send(self.repo_root, self.state_dir, "escalated" if human else "blocked", blocking)

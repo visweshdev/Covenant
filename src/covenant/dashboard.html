@@ -70,6 +70,20 @@
   .msg { margin-top: 8px; font-size: 13px; }
   .msg ul { margin: 4px 0 0; padding-left: 18px; }
   .note { color: var(--muted); font-size: 12px; }
+  .history { grid-column: 2; padding: 18px; min-width: 0; }
+  @media (max-width: 820px) { .history { grid-column: 1; } }
+  .history select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; max-width: 100%; }
+  .history input[type=range] { flex: 1; min-width: 160px; accent-color: var(--accent); }
+  .steps { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+  .step { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .step:last-child { border-bottom: 0; }
+  .step .t { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .step.future { opacity: .35; }
+  .step.now { background: var(--chip); box-shadow: inset 3px 0 0 var(--accent); }
+  .step.bad .what { color: var(--bad); }
+  .focus { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .focus .why { margin-top: 4px; }
+  .focus .fix { color: var(--muted); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -98,6 +112,16 @@
       </div>
       <div class="msg" id="ed-msg"></div>
     </div>
+  </section>
+  <section class="panel history" id="history" hidden>
+    <h3 style="margin-top:0">Replay a session</h3>
+    <div class="row">
+      <select id="h-session" aria-label="Session"></select>
+      <input type="range" id="h-step" min="0" max="0" value="0" aria-label="Step">
+      <span class="note" id="h-pos"></span>
+    </div>
+    <div class="focus" id="h-focus"></div>
+    <div class="steps" id="h-steps"></div>
   </section>
 </main>
 <script>
@@ -289,6 +313,61 @@ async function save(restart) {
 $("ed-save").onclick = () => save(false);
 $("ed-restart").onclick = () => save(true);
 
+// ----- history: pick a session, step through it --------------------------------------------
+let historyFor = null, replay = null;
+
+function stepText(s) {
+  if (s.kind === "event") return `${s.type}${s.detail ? " · " + s.detail : ""}`;
+  const ids = s.rules.map((r) => r.id).join(", ");
+  const what = String(s.type || "");
+  const text = what.startsWith("check") ? `Covenant flagged a problem (${what.replace("check:", "")} check)`
+    : what.startsWith("refused") ? `Covenant ${what}`
+    : `Covenant ${s.allowed ? "reported" : "refused"} ${what}`;
+  return `${text}${ids ? " (" + ids + ")" : ""}`;
+}
+
+function showStep() {
+  if (!replay) return;
+  const steps = replay.steps, i = Number($("h-step").value);
+  $("h-pos").textContent = steps.length ? `step ${i + 1} of ${steps.length}` : "";
+  const s = steps[i];
+  if (!s) { $("h-focus").innerHTML = '<span class="note">No steps recorded in this session.</span>'; $("h-steps").innerHTML = ""; return; }
+  const fired = new Set(steps.slice(0, i + 1).filter((x) => x.kind === "decision").flatMap((x) => x.rules.map((r) => r.id)));
+  const rulesLine = replay.rules.length
+    ? replay.rules.map((r) => `<span class="chip ${fired.has(r.id) ? "bad" : "ok"}" title="${esc(r.rule)}">${esc(r.id)}</span>`).join(" ")
+    : "";
+  const body = s.kind === "decision"
+    ? s.rules.map((r) => `<div style="margin-top:8px"><b>${esc(r.id)}</b> “${esc(r.rule)}”${r.escalated ? ' <span class="chip bad">handed to a human</span>' : ""}
+        <div class="why">${esc(r.why)}</div>${r.fix ? `<div class="fix">Fix: ${esc(r.fix)}</div>` : ""}</div>`).join("")
+    : "";
+  $("h-focus").innerHTML = `<div><span class="t">${esc(when(s.ts))}</span> &nbsp;<b>${esc(stepText(s))}</b></div>${body}
+    ${rulesLine ? `<div class="note" style="margin-top:10px">Rules that have fired by this step (red): ${rulesLine}</div>` : ""}`;
+  $("h-steps").innerHTML = steps.map((x, n) => `<div class="step ${n > i ? "future" : ""} ${n === i ? "now" : ""} ${x.kind === "decision" && !x.allowed ? "bad" : ""}" data-n="${n}">
+      <span class="t">${esc(new Date(x.ts).toLocaleTimeString())}</span><span class="what">${esc(stepText(x))}</span></div>`).join("");
+  for (const el of $("h-steps").querySelectorAll(".step")) el.onclick = () => { $("h-step").value = el.dataset.n; showStep(); };
+  const now = $("h-steps").querySelector(".now");
+  if (now) now.scrollIntoView({ block: "nearest" });
+}
+
+async function loadSession(sid, toEnd) {
+  replay = await getJSON(`/api/workspaces/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(sid)}`);
+  $("h-step").max = Math.max(0, replay.steps.length - 1);
+  if (toEnd) $("h-step").value = $("h-step").max;
+  showStep();
+}
+
+async function loadHistory() {
+  $("history").hidden = !selected;
+  if (!selected || historyFor === selected) return;
+  historyFor = selected;
+  const list = await getJSON(`/api/workspaces/${encodeURIComponent(selected)}/sessions`);
+  $("h-session").innerHTML = list.map((s) =>
+    `<option value="${esc(s.id)}">${s.id === "current" ? "This task" : esc(when(s.started_at))} · ${s.events} events · ${s.refused} refused</option>`).join("");
+  await loadSession(list[0] ? list[0].id : "current", true);
+}
+$("h-session").onchange = () => loadSession($("h-session").value, true);
+$("h-step").oninput = showStep;
+
 async function refresh() {
   try {
     const items = await getJSON("/api/workspaces");
@@ -296,6 +375,7 @@ async function refresh() {
     if (selected) renderDetail(await getJSON(`/api/workspaces/${encodeURIComponent(selected)}`));
     else $("detail").innerHTML = '<div class="empty">Select a repository.</div>';
     if (selected && editorFor !== selected) await loadEditor(false);
+    await loadHistory();
     $("live").textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $("live").innerHTML = `<span class="err">${esc(err.message)}</span>`;

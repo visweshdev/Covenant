@@ -1,5 +1,5 @@
 name: Covenant
-description: Check a pull request against the repository's Covenant (API, data and test rules for coding agents).
+description: Check a pull request against the repository's Covenant (rules for coding agents), and comment on the lines that break them.
 branding:
   icon: shield
   color: purple
@@ -14,6 +14,12 @@ inputs:
   run-tests:
     description: Run the Covenant's test commands on the PR
     default: "true"
+  comment:
+    description: Comment on the PR (inline on the lines that break a rule, plus one summary comment kept up to date). Needs `permissions: pull-requests: write`.
+    default: "true"
+  agent:
+    description: Agent name for path ownership rules (COVENANT_AGENT)
+    default: ""
   python-version:
     description: Python used to run Covenant
     default: "3.12"
@@ -30,9 +36,16 @@ runs:
     - name: Check the Covenant
       shell: bash
       env:
+        # Inputs go through the environment, never pasted into the script.
         COVENANT_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        COVENANT_FILE: ${{ inputs.covenant }}
+        COVENANT_RUN_TESTS: ${{ inputs.run-tests }}
+        COVENANT_COMMENT: ${{ inputs.comment }}
+        COVENANT_AGENT: ${{ inputs.agent }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
-        args=(--covenant "${{ inputs.covenant }}" ci --format github)
+        args=(--covenant "$COVENANT_FILE" ci --format github)
         if [ -n "$COVENANT_BASE" ]; then args+=(--base "$COVENANT_BASE"); fi
-        if [ "${{ inputs.run-tests }}" != "true" ]; then args+=(--no-tests); fi
+        if [ "$COVENANT_RUN_TESTS" != "true" ]; then args+=(--no-tests); fi
+        if [ "$COVENANT_COMMENT" = "true" ]; then args+=(--comment); fi
         python -m covenant "${args[@]}"

@@ -146,3 +146,71 @@ def test_compile_keeps_extends(team_repo):
     )
     assert r.returncode == 0, r.stderr
     assert Covenant.load(team_repo / "covenant.yaml").extends == ["policies/team.yaml"]
+
+
+# ----- policies from a URL ---------------------------------------------------------------
+
+URL_POLICY = """policy:
+  name: org
+  extends: [base.yaml]
+  clauses:
+    - {id: ORG1, kind: EffectProhibition, source_span: never deploy, checker: command_guard, params: {deny: [deploy]}}
+"""
+URL_BASE = """policy:
+  name: org-base
+  clauses:
+    - {id: ORG0, kind: EffectProhibition, source_span: never force push, checker: command_guard, params: {deny: [force_push]}}
+"""
+
+
+@pytest.fixture
+def policy_server():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    files = {"/team/policy.yaml": URL_POLICY, "/team/base.yaml": URL_BASE}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = files.get(self.path)
+            self.send_response(200 if body else 404)
+            self.end_headers()
+            if body:
+                self.wfile.write(body.encode())
+
+        def log_message(self, *a):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}", files
+    server.shutdown()
+
+
+def test_policy_from_a_url_with_nested_extends_and_offline_cache(policy_server, mylib_repo):
+    base, files = policy_server
+    cov = Covenant(instruction="x", goal={"action": "x"}, clauses=[], extends=[f"{base}/team/policy.yaml"])
+    merged, used = policy.resolve(cov, policy.disk_reader, str(mylib_repo))
+    assert [c.id for c in merged.clauses] == ["ORG0", "ORG1"]
+    assert merged.clauses[1].origin == f"org ({base}/team/policy.yaml)"
+    assert all(Path(p).is_file() for p in used)  # local cached copies, so they can be hashed and guarded
+    files.clear()  # the server is "down": the last good copy is used
+    merged, _ = policy.resolve(cov, policy.disk_reader, str(mylib_repo))
+    assert [c.id for c in merged.clauses] == ["ORG0", "ORG1"]
+
+
+def test_pinned_policy_url(policy_server, mylib_repo):
+    import hashlib
+
+    base, files = policy_server
+    good = hashlib.sha256(URL_BASE.encode()).hexdigest()
+    ok = Covenant(instruction="x", goal={"action": "x"}, clauses=[], extends=[f"{base}/team/base.yaml#sha256={good}"])
+    assert [c.id for c in policy.resolve(ok, policy.disk_reader, str(mylib_repo))[0].clauses] == ["ORG0"]
+    files["/team/base.yaml"] = URL_BASE.replace("force_push", "publish")
+    with pytest.raises(policy.PolicyError, match="pinned sha256"):
+        policy.resolve(ok, policy.disk_reader, str(mylib_repo))
+
+
+def test_plain_http_policy_urls_are_refused():
+    with pytest.raises(policy.PolicyError, match="https"):
+        policy.fetch("http://example.com/policy.yaml")

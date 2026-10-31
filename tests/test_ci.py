@@ -98,3 +98,55 @@ def test_cli_ci_exit_codes(pr):
     commit(repo)
     r = subprocess.run(cmd + ["--format", "json"], capture_output=True, text=True, env=env)
     assert r.returncode == 1 and '"C2"' in r.stdout
+
+
+def test_pr_comments_inline_on_changed_lines_and_one_summary(pr):
+    from covenant import github
+
+    repo, base = pr
+    core = repo / "mylib" / "core.py"
+    core.write_text(core.read_text().replace("def parse(text: str, strict: bool = False)", "def parse(text: str)")
+                    .replace("strict=strict", "strict=False"))
+    (repo / "data" / "users.json").unlink()
+    commit(repo)
+    result = run(repo, base, run_test_commands=False)
+    calls = []
+    store = {"comments": [], "issue": []}
+
+    def fake(method, path, body):
+        calls.append((method, path, body))
+        if method == "GET" and path.startswith("/repos/o/r/pulls/7/comments"):
+            return store["comments"]
+        if method == "GET" and path.startswith("/repos/o/r/issues/7/comments"):
+            return store["issue"]
+        if method == "POST" and path.endswith("/reviews"):
+            store["comments"] += body["comments"]
+        if method == "POST" and path.endswith("/issues/7/comments"):
+            store["issue"].append({"id": 99, "body": body["body"]})
+        return {}
+
+    done = github.post(result, repo, request=fake, context=("o/r", 7, "abc123"))
+    review = next(b for m, p, b in calls if p.endswith("/reviews"))
+    assert review["commit_id"] == "abc123" and review["event"] == "COMMENT"
+    assert len(review["comments"]) == 1
+    inline = review["comments"][0]
+    assert inline["path"] == "mylib/core.py" and inline["side"] == "RIGHT"
+    assert "def parse" in core.read_text().splitlines()[inline["line"] - 1]
+    assert "Covenant C1" in inline["body"]
+    assert done == {"line_comments": 1, "already_posted": 0, "summary": "created"}
+    summary = store["issue"][0]["body"]
+    assert "C2" in summary and github.MARKER in summary  # the deleted file has no line: it's in the summary
+
+    calls.clear()
+    again = github.post(result, repo, request=fake, context=("o/r", 7, "abc123"))
+    assert again == {"line_comments": 0, "already_posted": 1, "summary": "updated"}
+    assert not any(p.endswith("/reviews") for m, p, b in calls)
+    assert ("PATCH", "/repos/o/r/issues/comments/99") in [(m, p) for m, p, b in calls]
+
+
+def test_pr_comments_are_skipped_outside_github(pr):
+    from covenant import github
+
+    repo, base = pr
+    result = run(repo, base, run_test_commands=False)
+    assert "skipped" in github.post(result, repo, context=None) or github.pr_context({}) is None

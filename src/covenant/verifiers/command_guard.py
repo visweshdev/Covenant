@@ -12,9 +12,12 @@ guard against mistakes and shortcuts, not a sandbox: an agent determined to hide
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from urllib.parse import urlparse
 
 from ..feedback import ViolationReport
 from ..ir import Clause
+from . import network, sql_guard
 
 _GIT = r"\bgit(?:\s+-[cC]\s+\S+|\s+--[\w-]+(?:=\S+)?)*\s+"
 
@@ -68,11 +71,14 @@ CATEGORIES: dict[str, tuple[str, str, str]] = {
     "system_changes": ("changing system settings",
                        r"\b(?:chmod\s+-R\s+777|chown\s+-R|systemctl|launchctl|reg\s+(?:add|delete)|Set-ExecutionPolicy|setx|crontab)\b",
                        "Don't change system settings; ask the human"),
+    # Checked by reading the SQL (see sql_guard), not by this pattern.
+    "destructive_sql": ("destructive SQL", "",
+                        "Don't drop, truncate or wipe tables; change rows with a WHERE, or ask the human"),
 }
 _SAFE_ENV = re.compile(r"\.env(?:\.[\w-]+)*\.(?:example|sample|template|dist)\b")
 
 
-def matches(clause: Clause, command: str) -> list[tuple[str, str, str]]:
+def matches(clause: Clause, command: str, repo: Path | None = None) -> list[tuple[str, str, str]]:
     """(category, what it is, hint) for each denied category the command hits."""
     hits = []
     for name in clause.params.get("deny", []):
@@ -80,6 +86,20 @@ def matches(clause: Clause, command: str) -> list[tuple[str, str, str]]:
         if not spec:
             continue
         what, rx, hint = spec
+        if name == "destructive_sql":
+            for kind, statement in sql_guard.in_command(command, repo):
+                hits.append((name, f"SQL that {sql_guard.WHAT[kind]}: {statement[:120]}", hint))
+            continue
+        if name == "network" and "allow_hosts" in clause.params:
+            allowed = clause.params["allow_hosts"]
+            blocked = network.blocked_hosts(command, allowed, repo)
+            if blocked is None:
+                hits.append((name, "network access to a destination Covenant can't work out",
+                             f"Only {', '.join(allowed)} may be reached; write the full URL, or ask the human"))
+            elif blocked:
+                hits.append((name, f"network access to {', '.join(blocked)}",
+                             f"Only {', '.join(allowed)} may be reached in this task; ask the human to allow more"))
+            continue
         text = _SAFE_ENV.sub("", command) if name == "read_secrets" else command
         if re.search(rx, text, re.I if name != "recursive_delete" else 0):
             hits.append((name, what, hint))
@@ -89,11 +109,36 @@ def matches(clause: Clause, command: str) -> list[tuple[str, str, str]]:
     return hits
 
 
-def check(clause: Clause, command: str) -> list[ViolationReport]:
+def check(clause: Clause, command: str, repo: Path | None = None) -> list[ViolationReport]:
     return [
         ViolationReport.for_clause(clause, {"command": command[:300], "category": name, "what": what}, hints=[hint])
-        for name, what, hint in matches(clause, command)
+        for name, what, hint in matches(clause, command, repo)
     ]
+
+
+def check_tool(clause: Clause, tool: str, tool_input: dict) -> list[ViolationReport]:
+    """Non-shell tool calls: web fetches and searches (network rules) and database tools (SQL rules)."""
+    deny = clause.params.get("deny", [])
+    reports = []
+
+    def report(category: str, what: str, hint: str) -> None:
+        evidence = {"tool": tool, "category": category, "what": what}
+        reports.append(ViolationReport.for_clause(clause, evidence, hints=[hint]))
+
+    if "network" in deny and tool in ("WebFetch", "WebSearch"):
+        allowed = clause.params.get("allow_hosts")
+        url = str(tool_input.get("url") or "")
+        host = (urlparse(url).hostname or "") if url else ""
+        if allowed is None:
+            report("network", f"{tool} ({url or tool_input.get('query', '')})"[:200], "This task runs without network access; ask the human")
+        elif tool == "WebSearch":
+            report("network", "a web search (it can reach any site)", f"Only {', '.join(allowed)} may be reached; fetch a page there instead")
+        elif not host or not network.host_allowed(host, allowed):
+            report("network", f"fetching {host or url}", f"Only {', '.join(allowed)} may be reached in this task; ask the human to allow more")
+    if "destructive_sql" in deny and tool not in ("WebFetch", "WebSearch"):
+        for kind, statement in sql_guard.in_tool_input(tool_input):
+            report("destructive_sql", f"SQL that {sql_guard.WHAT[kind]}: {statement[:120]}", CATEGORIES["destructive_sql"][2])
+    return reports
 
 
 def unknown_categories(clause: Clause) -> list[str]:

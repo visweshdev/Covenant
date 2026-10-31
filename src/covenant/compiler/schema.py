@@ -28,6 +28,9 @@ class Intent(str, Enum):
     NO_SUPPRESSIONS = "no_suppressions"
     NO_LARGE_FILES = "no_large_files"
     FORBIDDEN_COMMANDS = "forbidden_commands"
+    NETWORK_ALLOWLIST = "network_allowlist"
+    PATH_OWNERSHIP = "path_ownership"
+    BUDGET = "budget"
     OTHER = "other"
 
 
@@ -52,7 +55,12 @@ INTENT_HELP = {
     Intent.NO_SUPPRESSIONS: "warnings and type or lint errors must be fixed, not silenced (type: ignore, noqa, ts-ignore, eslint-disable)",
     Intent.NO_LARGE_FILES: "no large files or binaries may be added",
     Intent.FORBIDDEN_COMMANDS: "commands the agent must not run: force push, rewriting history, sudo, deploying, publishing, "
-                               "installing packages, network access, reading secret files, killing processes and the like",
+                               "installing packages, network access, reading secret files, killing processes, "
+                               "destructive SQL (DROP, TRUNCATE, DELETE without WHERE) and the like",
+    Intent.NETWORK_ALLOWLIST: "the network may be used, but only to reach the hosts named (list them in paths, e.g. pypi.org)",
+    Intent.PATH_OWNERSHIP: "a folder belongs to a named team or agent and only that one may change it "
+                           "(paths: the folders; put the owner's name first in paths, prefixed with 'owner:')",
+    Intent.BUDGET: "a limit on the task's time, number of actions or money spent (e.g. stop after 20 minutes, spend at most $2)",
     Intent.OTHER: "any other constraint (style, readability, process) with no automatic check",
 }
 

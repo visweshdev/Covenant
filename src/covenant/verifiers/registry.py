@@ -67,6 +67,10 @@ REGISTRY: dict[str, CheckerSpec] = {
         CheckerSpec("no_suppressions", ClauseKind.SEMANTIC_INVARIANT, "No new type-check or lint suppressions"),
         CheckerSpec("large_files", ClauseKind.SEMANTIC_INVARIANT, "No added or changed file over max_kb"),
         CheckerSpec("command_guard", ClauseKind.EFFECT_PROHIBITION, "Denied shell commands are refused before they run", ("deny",)),
+        CheckerSpec("budget", ClauseKind.EFFECT_PROHIBITION,
+                    "The task stops at a time, action or cost limit (max_minutes, max_actions, max_cost_usd)"),
+        CheckerSpec("path_owner", ClauseKind.SEMANTIC_INVARIANT,
+                    "Owned folders change only by their owning agent (COVENANT_AGENT)", ("owners",)),
         CheckerSpec("llm_review", ClauseKind.SEMANTIC_INVARIANT, "Claude reviews the change against a rule no checker covers (advisory)"),
         CheckerSpec(
             "ts_api_surface_diff",

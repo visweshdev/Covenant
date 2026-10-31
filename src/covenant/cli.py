@@ -36,8 +36,12 @@ def _parser() -> argparse.ArgumentParser:
     ci.add_argument("--base", help="base ref (default: merge-base with the PR target or main)")
     ci.add_argument("--no-tests", action="store_true", help="don't run the test commands")
     ci.add_argument("--format", choices=["text", "github", "json"], default="text")
+    ci.add_argument("--comment", action="store_true",
+                    help="in GitHub Actions: comment on the PR's lines and keep one summary comment up to date")
     comp = sub.add_parser("compile", help="turn a plain-English instruction into covenant.yaml")
-    comp.add_argument("instruction", help="the instruction you would give the agent")
+    comp.add_argument("instruction", nargs="?", default="", help="the instruction you would give the agent")
+    comp.add_argument("--pack", action="append", default=[], metavar="NAME",
+                      help="add a ready-made rule set (see `covenant packs`); repeatable")
     comp.add_argument("--offline", action="store_true", help="use the pattern extractor instead of Claude")
     comp.add_argument("--no-review", action="store_true",
                       help="mark rules no checker covers as unenforceable instead of having Claude review commits against them")
@@ -61,7 +65,27 @@ def _parser() -> argparse.ArgumentParser:
     amend.add_argument("--unattended", action="store_true", help="ask nothing; take the conservative reading")
     amend.add_argument("--yes", action="store_true", help="add the rules without asking for approval")
     amend.add_argument("--dry-run", action="store_true", help="print the new rules without adding them")
+    amend.add_argument("--pack", action="append", default=[], metavar="NAME", help="add a ready-made rule set")
     amend.set_defaults(format="text")
+    sub.add_parser("packs", help="list the ready-made rule packs")
+    exp = sub.add_parser("explain", help="why was something blocked, and what can be done, in plain words")
+    exp.add_argument("-n", type=int, default=1, help="explain the last N problems (default 1)")
+    exp.add_argument("--format", choices=["text", "json"], default="text")
+    sug = sub.add_parser("suggest", help="suggest rules from this repo's history (reverts, removed secrets, PR reviews)")
+    sug.add_argument("--github", action="store_true", help="also read recent PR review comments with the gh CLI")
+    sug.add_argument("--limit", type=int, default=500, help="commits to read (default 500)")
+    al = sub.add_parser("alerts", help="show alert settings, or send a test alert")
+    al.add_argument("action", nargs="?", choices=["show", "test"], default="show")
+    sbx = sub.add_parser("sandbox", help="run the agent in Docker, with Covenant's state and the internet out of its reach")
+    sbx.add_argument("--allow", action="append", default=[], metavar="HOST", help="another host the agent may reach")
+    sbx.add_argument("--print", action="store_true", help="write the files and show the commands, but don't run them")
+    sbx.add_argument("agent_cmd", nargs=argparse.REMAINDER, help="command to run in the sandbox after -- (default: claude)")
+    sub.add_parser("snapshots", help="list restore points of the working tree")
+    snap = sub.add_parser("snapshot", help="take a restore point of the working tree now")
+    snap.add_argument("label", nargs="?", default="taken by hand")
+    undo = sub.add_parser("undo", help="put the working tree back to a restore point (default: the latest)")
+    undo.add_argument("id", nargs="?", type=int, help="snapshot number (see `covenant snapshots`)")
+    undo.add_argument("--yes", action="store_true", help="don't ask for confirmation")
     init = sub.add_parser("init", help="set up a repo: validate, install git and Claude Code hooks, start")
     init.add_argument("--no-claude", action="store_true", help="skip the Claude Code hooks")
     init.add_argument("--no-git", action="store_true", help="skip the git hooks")
@@ -198,6 +222,14 @@ def _ci(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
                 f.write(ci.markdown_summary(result))
     else:
         print(ci.markdown_summary(result))
+    if args.comment:
+        from . import github
+
+        try:
+            done = github.post(result, repo)
+            print(f"covenant: PR comments: {done}", file=sys.stderr)
+        except Exception as exc:  # commenting is a courtesy; the check result stands either way
+            print(f"covenant: couldn't comment on the PR: {type(exc).__name__}: {exc}", file=sys.stderr)
     return 1 if result.failed else 0
 
 
@@ -294,6 +326,76 @@ def _dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sandbox(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
+    import shlex
+    import subprocess
+
+    from . import sandbox
+
+    try:
+        covenant = policy.load(covenant_path)[0]
+    except (OSError, ValidationError, ValueError) as exc:
+        print(f"covenant: cannot load {covenant_path}: {exc}", file=sys.stderr)
+        return 3
+    plan = sandbox.prepare(repo, covenant, args.allow, Path(args.state_dir).resolve() if args.state_dir else None)
+    agent_cmd = [a for a in args.agent_cmd if a != "--"] if args.agent_cmd else []
+    steps = sandbox.commands(plan["compose"], agent_cmd)
+    print(f"Sandbox files in {plan['dir']}", file=sys.stderr)
+    print(f"The agent may reach: {', '.join(plan['allow'])}", file=sys.stderr)
+    if args.print or not sandbox.docker_available():
+        if not args.print:
+            print("covenant: Docker isn't running here, so nothing was started. With Docker, run:", file=sys.stderr)
+        for step in steps:
+            print(" ".join(shlex.quote(s) for s in step))
+        return 0 if args.print else 3
+    try:
+        if subprocess.run(steps[0]).returncode != 0:
+            return 3
+        return subprocess.run(steps[1]).returncode
+    finally:
+        subprocess.run(steps[2])
+
+
+def _snapshots(args: argparse.Namespace, repo: Path) -> int:
+    from . import snapshots
+
+    state = Path(args.state_dir).resolve() if args.state_dir else default_state_dir(repo)
+    try:
+        if args.command == "snapshot":
+            snap = snapshots.take(repo, state, args.label)
+            print(f"snapshot {snap['id']} taken" if snap else "nothing changed since the last snapshot", file=sys.stderr)
+            return 0
+        if args.command == "snapshots":
+            snaps = snapshots.listing(state)
+            if not snaps:
+                print("no snapshots yet", file=sys.stderr)
+            for s in snaps:
+                print(f"{s['id']:>4}  {s['at'][:19].replace('T', ' ')}  {s['label']}")
+            return 0
+        snap = snapshots.get(state, args.id)
+        changed = snapshots.changed_since(repo, state, args.id)
+        if not changed:
+            print(f"the working tree already matches snapshot {snap['id']}", file=sys.stderr)
+            return 0
+        print(f"Snapshot {snap['id']} ({snap['label']}, {snap['at'][:19].replace('T', ' ')}) differs in {len(changed)} file(s):",
+              file=sys.stderr)
+        for path in changed[:30]:
+            print(f"  {path}", file=sys.stderr)
+        if not args.yes:
+            if not sys.stdin.isatty():
+                print("covenant: pass --yes to restore without a prompt.", file=sys.stderr)
+                return 3
+            if input("Restore these files? [y/N] ").strip().lower() not in ("y", "yes"):
+                return 1
+        result = snapshots.restore(repo, state, args.id)
+        print(f"restored snapshot {snap['id']}: {len(result['changed'])} file(s) changed, {len(result['removed'])} removed. "
+              f"Changed your mind? `covenant undo {result['undo_with']}`", file=sys.stderr)
+        return 0
+    except (ValueError, RuntimeError) as exc:
+        print(f"covenant: {exc}", file=sys.stderr)
+        return 3
+
+
 def _renumber(existing: list[str], clauses: list) -> list:
     """Give new clauses ids that continue after the existing C<n> ones."""
     import re
@@ -387,8 +489,8 @@ def _compile(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
         print(f"covenant: warning: {note}", file=sys.stderr)
     try:
         result = compile_instruction(args.instruction, repo, extractor, ask=ask if interactive else None, answers=answers,
-                                     review=not (args.offline or args.no_review))
-    except CompileError as exc:
+                                     review=not (args.offline or args.no_review), packs=args.pack)
+    except (CompileError, ValueError) as exc:
         print(f"covenant: {exc}", file=sys.stderr)
         return 3
     if args.command == "amend":
@@ -462,7 +564,49 @@ def main(argv: list[str] | None = None) -> int:
             return 3
     if args.command == "bench":
         return _bench(args)
+    if args.command == "packs":
+        from . import packs
+
+        print(packs.listing())
+        return 0
+    if args.command in ("snapshots", "snapshot", "undo"):
+        return _snapshots(args, repo)
+    if args.command == "sandbox":
+        return _sandbox(args, repo, covenant_path)
+    if args.command == "explain":
+        from . import explain
+
+        state = Path(args.state_dir).resolve() if args.state_dir else default_state_dir(repo)
+        path = state / "reports.jsonl"
+        entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] \
+            if path.is_file() else []
+        if args.format == "json":
+            print(json.dumps(explain.latest(entries)[-args.n:], indent=2))
+        else:
+            print(explain.explain(entries, args.n))
+        return 0
+    if args.command == "suggest":
+        from . import suggest
+
+        found = suggest.suggest(repo, args.limit, github=args.github)
+        print(suggest.render(found))
+        return 0
+    if args.command == "alerts":
+        from . import alerts
+
+        print(alerts.describe())
+        if args.action == "test":
+            if not alerts.configured():
+                return 3
+            state = Path(args.state_dir).resolve() if args.state_dir else default_state_dir(repo)
+            sent = alerts.send(repo, state, "test", [], force=True)
+            print(f"sent via {', '.join(sent)}" if sent else f"sending failed; see {state / 'alerts.log'}")
+            return 0 if sent else 1
+        return 0
     if args.command == "compile":
+        if not args.instruction and not args.pack:
+            print('covenant: give an instruction, a --pack, or both', file=sys.stderr)
+            return 3
         return _compile(args, repo, covenant_path)
     if args.command == "amend":
         if not covenant_path.exists():

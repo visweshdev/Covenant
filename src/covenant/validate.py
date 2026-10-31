@@ -50,6 +50,17 @@ def validate(covenant: Covenant, repo_root: Path) -> list[Issue]:
 
             for name in unknown_categories(clause):
                 add("error", f"unknown command category {name!r}; known: {', '.join(CATEGORIES)}")
+            if "allow_hosts" in clause.params and "network" not in clause.params.get("deny", []):
+                add("warning", "allow_hosts only applies with deny: [network]")
+        if spec.name == "budget":
+            limits = [k for k in ("max_minutes", "max_actions", "max_cost_usd") if k in clause.params]
+            if not limits:
+                add("error", "a budget needs max_minutes, max_actions or max_cost_usd")
+            for k in limits:
+                if not isinstance(clause.params[k], (int, float)) or clause.params[k] <= 0:
+                    add("error", f"{k} must be a positive number")
+        if spec.name == "path_owner" and not isinstance(clause.params.get("owners"), dict):
+            add("error", "owners must map path patterns to agent names, e.g. {billing/**: [payments]}")
 
         if spec.name == "trace_monitor" and "formula" in clause.params:
             try:

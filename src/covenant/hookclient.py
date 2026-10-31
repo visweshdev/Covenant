@@ -83,9 +83,24 @@ def start_daemon(opts: dict[str, str]) -> None:
             continue  # e.g. the job doesn't allow breakaway; the slow path still works regardless
 
 
+def _with_agent(body: bytes) -> bytes:
+    """Pass on who this agent is (COVENANT_AGENT, see verifiers/ownership): the daemon was
+    started by some other process, so its own environment can't tell."""
+    import os
+
+    try:
+        payload = json.loads(body or b"{}")
+    except ValueError:
+        return body
+    if isinstance(payload, dict):
+        payload["covenant_agent"] = os.environ.get("COVENANT_AGENT", "")
+        return json.dumps(payload).encode("utf-8")
+    return body
+
+
 def main(argv: list[str]) -> int:
     opts = _args(argv)
-    body = sys.stdin.buffer.read()
+    body = _with_agent(sys.stdin.buffer.read())
     if opts.get("daemon-file"):
         try:
             reply = ask_daemon(opts["daemon-file"], body)

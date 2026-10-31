@@ -107,6 +107,73 @@ def workspace_detail(workspace_id: str) -> dict[str, Any] | None:
     return data
 
 
+# ----- history: past sessions, replayed step by step ---------------------------------------
+
+def _session_folder(workspace_id: str, session_id: str) -> Path | None:
+    if not _ID.match(workspace_id) or not (session_id == "current" or _ID.match(session_id)):
+        return None
+    folder = workspaces_dir() / workspace_id
+    folder = folder if session_id == "current" else folder / "history" / session_id
+    return folder if (folder / "session.json").is_file() else None
+
+
+def sessions(workspace_id: str) -> list[dict[str, Any]] | None:
+    """The current task and the archived ones, newest first."""
+    if not _ID.match(workspace_id) or not (workspaces_dir() / workspace_id / "session.json").is_file():
+        return None
+    folder = workspaces_dir() / workspace_id
+    found = [("current", folder)]
+    history = folder / "history"
+    if history.is_dir():
+        found += [(f.name, f) for f in sorted(history.iterdir(), reverse=True) if (f / "session.json").is_file()]
+    out = []
+    for sid, f in found:
+        try:
+            started = json.loads((f / "session.json").read_text(encoding="utf-8")).get("started_at")
+        except ValueError:
+            started = None
+        reports = [json.loads(line) for line in _lines(f / "reports.jsonl")]
+        out.append({"id": sid, "started_at": started, "events": len(_lines(f / "trace.jsonl")),
+                    "problems": len(reports), "refused": sum(1 for r in reports if not r.get("allowed", True))})
+    return out
+
+
+def timeline(workspace_id: str, session_id: str) -> dict[str, Any] | None:
+    """Every step of a session in order: what the agent did, and every decision Covenant made."""
+    from . import explain
+
+    folder = _session_folder(workspace_id, session_id)
+    if folder is None:
+        return None
+    steps: list[dict[str, Any]] = []
+    for line in _lines(folder / "trace.jsonl"):
+        e = json.loads(line)
+        detail = e.get("path") or e.get("cmd") or e.get("target") or e.get("sha") or e.get("remote") or ""
+        if e.get("type") == "test":
+            detail += " (passed)" if e.get("exit_code") == 0 else " (failed)"
+        steps.append({"ts": e.get("ts"), "kind": "event", "type": e.get("type"), "detail": detail})
+    for line in _lines(folder / "reports.jsonl"):
+        d = json.loads(line)
+        steps.append({
+            "ts": d.get("ts"), "kind": "decision", "type": d.get("event"), "allowed": d.get("allowed", True),
+            "rules": [{"id": r.get("violation"), "rule": r.get("clause"), "checker": r.get("checker"),
+                       "why": explain.why(r), "fix": (r.get("repair_hints") or [""])[0],
+                       "warn": r.get("on_violation") == "warn", "escalated": bool(r.get("escalated"))}
+                      for r in d.get("reports", [])],
+        })
+    steps.sort(key=lambda s: s.get("ts") or "")
+    session = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    rules = []
+    approved = folder / "covenant.approved.yaml"
+    if approved.is_file():
+        try:
+            rules = [{"id": c.id, "rule": c.source_span, "checker": c.checker}
+                     for c in Covenant.load(approved).clauses]
+        except (OSError, ValidationError, ValueError):
+            rules = []
+    return {"id": session_id, "started_at": session.get("started_at"), "steps": steps, "rules": rules}
+
+
 # ----- editing ---------------------------------------------------------------------------
 
 MAX_BODY = 1_000_000
@@ -262,6 +329,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(list_workspaces())
             elif path == "/api/capabilities":
                 self._json({"editable": bool(getattr(self.server, "token", None))})
+            elif path.startswith("/api/workspaces/") and "/sessions" in path:
+                ws, _, rest = path.removeprefix("/api/workspaces/").partition("/sessions")
+                out = sessions(ws) if rest in ("", "/") else timeline(ws, rest.strip("/"))
+                if out is None:
+                    self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self._json(out)
             elif path.startswith("/api/workspaces/") and path.endswith("/rules"):
                 out = rules_text(path.removeprefix("/api/workspaces/").removesuffix("/rules"))
                 if out is None:

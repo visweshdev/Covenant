@@ -58,6 +58,23 @@ TOOLS = [
         "description": "Run every Covenant check on the current state (API surface, protected data, integrity).",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
+    {
+        "name": "covenant_check_command",
+        "description": "Check whether a shell command is allowed before running it (force pushes, destructive SQL, "
+                       "network access and the other refused commands). Returns the reasons if not.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"command": {"type": "string", "description": "The command you plan to run"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "covenant_explain",
+        "description": "Why was something blocked, and what can be done about it, in plain words.",
+        "inputSchema": {"type": "object", "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 10}},
+                        "additionalProperties": False},
+    },
 ]
 
 
@@ -102,6 +119,17 @@ class CovenantMcpServer:
             return _decision_text(decision, f"A {event.type} would be allowed now.")
         if name == "covenant_check":
             return _decision_text(rt.check("mcp"), "All Covenant checks pass.")
+        if name == "covenant_check_command":
+            reports = rt.command_reports(arguments["command"]) + rt.budget_reports(count=False)
+            if not reports:
+                return "Allowed: no rule refuses this command.", False
+            rt.log_refusal("refused this command (MCP check)", reports)
+            return ClaudeCodeHook._render("Covenant would refuse this command", reports), True
+        if name == "covenant_explain":
+            from .. import explain
+
+            entries = [json.loads(line) for line in rt._read_lines("reports.jsonl")]
+            return explain.explain(entries, int(arguments.get("count", 1))), False
         raise KeyError(name)
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:

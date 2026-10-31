@@ -25,7 +25,7 @@ from .feedback import ViolationReport
 from .ir import ClauseKind, Covenant, OnViolation
 from .monitors.effects import EffectMonitor
 from .events import Effect
-from .runtime import SEMANTIC_VERIFIERS
+from .runtime import PRE_ACTION_CHECKERS, SEMANTIC_VERIFIERS
 from .verifiers.test_gate import run_tests
 
 DIFF_OPS = {"D": "delete", "M": "overwrite", "R": "rename", "T": "overwrite"}
@@ -121,6 +121,8 @@ def run_ci(repo: Path, covenant_path: Path, base: str | None = None, run_test_co
 
     changes = changed_files(repo, base_sha)
     for clause in covenant.enforced(ClauseKind.EFFECT_PROHIBITION):
+        if clause.checker in PRE_ACTION_CHECKERS:  # commands and budgets are judged while the agent works
+            continue
         monitor = EffectMonitor(clause, repo)
         for status, path in changes:
             op = DIFF_OPS.get(status)
@@ -151,8 +153,11 @@ def _escape(text: str) -> str:
 def github_annotations(result: CiResult) -> list[str]:
     lines = []
     for r in result.reports:
-        file = r.evidence.get("target") or r.evidence.get("exported_from") or r.evidence.get("path")
+        file = r.evidence.get("target") or r.evidence.get("file") or r.evidence.get("exported_from") or r.evidence.get("path")
         where = f" file={file}" if file and ":" not in str(file) else ""
+        line = r.evidence.get("line")
+        if where and isinstance(line, int):
+            where += f",line={line}"
         detail = r.evidence.get("symbol") or r.evidence.get("target") or r.evidence.get("test_cmd") or ""
         hint = f" Fix: {r.repair_hints[0]}" if r.repair_hints else ""
         lines.append(f"::error{where},title=Covenant {r.violation}::{_escape(f'{r.clause}: {detail}.{hint}')}")
