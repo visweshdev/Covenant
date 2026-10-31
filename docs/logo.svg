@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Covenant">
+  <title>Covenant</title>
+  <!-- The sealed C: a C whose open side is closed by a short bar, a boundary that holds. -->
+  <style>
+    .ink { stroke: #1d1b19; }
+    .latch { stroke: #b5452f; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #f4efe6; }
+      .latch { stroke: #e0684f; }
+    }
+  </style>
+  <defs>
+    <!-- A slight wobble, like a brush stroke, so the edges aren't machine-perfect. -->
+    <filter id="brush" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="4"/>
+      <feDisplacementMap in="SourceGraphic" scale="3.2"/>
+    </filter>
+  </defs>
+  <g filter="url(#brush)" fill="none" stroke-linecap="round">
+    <g transform="translate(4 0) rotate(-6 58 60)">
+      <path class="ink" d="M 83.3 37.3 A 34 34 0 1 0 83.3 82.7" stroke-width="17"/>
+      <path class="latch" d="M 91 45.5 C 92.2 53, 92.4 66, 91.3 74.5" stroke-width="10"/>
+    </g>
+  </g>
+</svg>

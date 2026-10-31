@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="110" alt="Covenant logo: a C closed by a short bar"></p>
+
 # Covenant
 
 Covenant turns the rules you give a coding agent ("don't change public APIs, don't delete
