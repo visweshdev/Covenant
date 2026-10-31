@@ -48,7 +48,15 @@ def git_reader(root: Path, ref: str) -> Reader:
             text=True,
             encoding="utf-8",
         )
-        return result.stdout if result.returncode == 0 else None
+        if result.returncode == 0:
+            return result.stdout
+        # A file git ignores (a generated _version.py, say) is never in a commit; read it from
+        # disk so both sides agree, instead of reporting its names as changed.
+        ignored = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", rel], capture_output=True)
+        path = root / rel
+        if ignored.returncode == 0 and path.is_file():
+            return path.read_text(encoding="utf-8")
+        return None
 
     return read
 
