@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/headers/vscode.svg" width="100%" alt="Covenant for VS Code: see and manage the rules your agents follow, in the editor."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/headers/vscode.png" width="100%" alt="Covenant for VS Code: see and manage the rules your agents follow, in the editor."></p>
 
 <p align="center">See and manage the rules <a href="https://github.com/visweshdev/Covenant">Covenant</a> enforces on coding agents, right in the editor. <a href="https://github.com/visweshdev/Covenant/blob/main/docs/README.md">Covenant docs</a></p>
 
