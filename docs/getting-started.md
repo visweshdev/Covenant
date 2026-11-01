@@ -40,15 +40,17 @@ covenant compile "Don't change public APIs, don't delete user data, run tests be
 ```
 
 Covenant splits the instruction into rules, ties each one to something real in the repo (the
-package's exports, the data folders, the test command), and picks a checker for each. The
-output looks something like this:
+package's exports, the data folders, the test command), and picks a checker for each. On the
+example project in [`examples/mylib`](../examples/mylib) it prints:
 
 ```text
-C1  "don't change public APIs" -> api_surface_diff
-      applies to src/mypkg/__init__.py exports
+C1  "Don't change public APIs" -> api_surface_diff
+      applies to mylib/__init__.py exports
+      assumes public = names exported from mylib/__init__.py
 C2  "don't delete user data" -> effect_monitor
       applies to data/**
-C3  "run tests before committing" -> trace_monitor
+      assumes protected locations found in the repo: data/**
+C3  'run tests before committing' -> trace_monitor
       assumes tests = `python -m pytest -q` (from tests/ folder)
 ```
 

@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 210" width="1200" height="210" role="img" aria-label="Results: violations per task fell from 1.17 to 0 on CovenantBench; task success stayed at 100 percent; on 4 real repos every trap was stopped; hooks take about 0.2 seconds per action">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 210" width="1200" height="210" role="img" aria-label="Results: violations per task fell from 1.17 to 0 on CovenantBench; task success stayed at 100 percent; 1,446 real commits from 50 repositories checked, 72 of 75 flags were real rule breaks; about 0.2 seconds per agent action">
   <title>Covenant results</title>
   <style>
-    .n { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif; font-size: 54px; fill: #f4efe6; }
-    .u { font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif; font-size: 28px; fill: #a59b8c; }
+    .n { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 50px; font-weight: 600; fill: #f4efe6; letter-spacing: -1px; }
+    .u { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 26px; font-weight: 500; fill: #a59b8c; letter-spacing: 0; }
     .l { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 15px; fill: #a59b8c; }
     .k { font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 12px; letter-spacing: 1.6px; font-weight: 700; fill: #e0684f; }
   </style>
@@ -11,22 +11,22 @@
 
   <g transform="translate(40 0)">
     <text class="k" x="0" y="58">VIOLATIONS PER TASK</text>
-    <text class="n" x="0" y="124"><tspan class="u" dy="0">1.17 → </tspan>0</text>
-    <text class="l" x="0" y="160">on CovenantBench, with Covenant</text>
+    <text class="n" x="0" y="122"><tspan class="u">1.17 → </tspan>0</text>
+    <text class="l" x="0" y="158">on CovenantBench, with Covenant</text>
   </g>
   <g transform="translate(340 0)">
     <text class="k" x="0" y="58">TASK SUCCESS</text>
-    <text class="n" x="0" y="124">100<tspan class="u">%</tspan></text>
-    <text class="l" x="0" y="160">kept: nothing useful was blocked</text>
+    <text class="n" x="0" y="122">100<tspan class="u">%</tspan></text>
+    <text class="l" x="0" y="158">nothing useful was blocked</text>
   </g>
   <g transform="translate(640 0)">
-    <text class="k" x="0" y="58">REAL REPOS</text>
-    <text class="n" x="0" y="124">4<tspan class="u"> / 4</tspan></text>
-    <text class="l" x="0" y="160">every trap refused or blocked</text>
+    <text class="k" x="0" y="58">REAL COMMITS CHECKED</text>
+    <text class="n" x="0" y="122">1,446</text>
+    <text class="l" x="0" y="158">from 50 repos; 72 of 75 flags real</text>
   </g>
   <g transform="translate(940 0)">
     <text class="k" x="0" y="58">PER AGENT ACTION</text>
-    <text class="n" x="0" y="124">0.2<tspan class="u"> s</tspan></text>
-    <text class="l" x="0" y="160">with fast hooks, on Windows</text>
+    <text class="n" x="0" y="122">0.2<tspan class="u"> s</tspan></text>
+    <text class="l" x="0" y="158">with fast hooks, on Windows</text>
   </g>
 </svg>

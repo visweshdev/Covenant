@@ -70,7 +70,7 @@ First release.
   - CI with `covenant ci` and a GitHub Action.
 - **Tools:** team policies (`extends`), a local dashboard and a VS Code extension.
 - **More rules:** only-these-files, secret scanning, keep-tests, change-size budgets, no debug
-  code, no warning suppressions, no large files, no new dependencies, and 15 kinds of refused
+  code, no warning suppressions, no large files, no new dependencies, and 16 kinds of refused
   shell commands (force push, deploy, publish, installing packages, network access and more).
 - **Claude review:** rules no checker covers are reviewed by Claude at each commit, as warnings.
 - **Compile with a Claude subscription:** `covenant compile` uses your Claude Code login when no

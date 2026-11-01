@@ -115,7 +115,7 @@ Say it in plain English; Covenant picks the checker.
 ## Tried on real repos
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/stats.svg" width="100%" alt="Violations per task fell from 1.17 to 0 on CovenantBench; task success stayed at 100%; on 4 real repos every trap was stopped; about 0.2 seconds per agent action">
+  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/stats.svg" width="100%" alt="Violations per task fell from 1.17 to 0 on CovenantBench; task success stayed at 100%; 1,446 real commits from 50 repos checked, 72 of 75 flags were real rule breaks; about 0.2 seconds per agent action">
 </p>
 
 Claude Code ran live under Covenant on [TinyDB](https://github.com/msiemens/tinydb),
