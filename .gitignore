@@ -6,3 +6,7 @@ __pycache__/
 .covenant/
 build/
 dist/
+
+# covenant bench replay output
+replay-work/
+replay-results.jsonl

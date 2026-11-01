@@ -54,6 +54,17 @@ function isHidden(decl) {
 // Structured call signatures, so the checker can tell additive changes from breaking ones.
 const sigs = {};
 
+// TypeScript caps printed types near a million characters even with NoTruncation, and where it
+// stops ("... 6 more ...") varies between runs. A shortened type can't be compared, so compare
+// the declaration's own source text instead: stable, and it changes when the declaration does.
+const TRUNCATED = /\.\.\. \d+ more \.\.\./;
+function show(type, decl, extraFlags = 0, enclosing = undefined) {
+  const text = clean(checker.typeToString(type, enclosing, flags | extraFlags));
+  // Past ~20k characters, also use the declaration: near the cap one side may be cut and the other not.
+  if ((!TRUNCATED.test(text) && text.length < 20000) || !decl) return text;
+  return `declared as ${clean(decl.getText().replace(/\s+/g, " "))}`;
+}
+
 function paramInfo(p) {
   const d = p.valueDeclaration;
   const optional = !!(d && (d.questionToken || d.initializer));
@@ -69,7 +80,7 @@ function recordSigs(key, signatures) {
   const sig = signatures[0];
   sigs[key] = {
     params: sig.getParameters().map(paramInfo),
-    ret: clean(checker.typeToString(sig.getReturnType(), undefined, flags)),
+    ret: show(sig.getReturnType(), sig.getDeclaration()),
     typeParams: (sig.getTypeParameters() || []).map((tp) => clean(checker.typeToString(tp, undefined, flags))),
   };
 }
@@ -81,7 +92,7 @@ function members(out, prefix, type, decl) {
     const optional = prop.flags & ts.SymbolFlags.Optional ? "?" : "";
     const readonly = pdecl && ts.getCombinedModifierFlags(pdecl) & ts.ModifierFlags.Readonly ? "readonly " : "";
     const ptype = checker.getTypeOfSymbolAtLocation(prop, pdecl || decl);
-    out[`${prefix}.${prop.getName()}`] = `${readonly}${optional}${clean(checker.typeToString(ptype, undefined, flags))}`;
+    out[`${prefix}.${prop.getName()}`] = `${readonly}${optional}${show(ptype, pdecl)}`;
     if (!optional) recordSigs(`${prefix}.${prop.getName()}`, ptype.getCallSignatures());
   }
 }
@@ -114,7 +125,7 @@ files.forEach((file, i) => {
     } else if (sym.flags & (S.Interface | S.TypeAlias)) {
       const declared = checker.getDeclaredTypeOfSymbol(sym);
       const kind = sym.flags & S.Interface ? "interface" : "type";
-      out[name] = `${kind} ${clean(checker.typeToString(declared, decl, flags | F.InTypeAlias))}`;
+      out[name] = `${kind} ${show(declared, decl, F.InTypeAlias, decl)}`;
       if (sym.flags & S.Interface) members(out, name, declared, decl);
     } else if (sym.flags & S.Enum) {
       out[name] = "enum";
@@ -122,7 +133,7 @@ files.forEach((file, i) => {
     } else if (sym.flags & (S.Function | S.Variable | S.ValueModule)) {
       const type = checker.getTypeOfSymbolAtLocation(sym, decl);
       const kind = sym.flags & S.Function ? "function" : sym.flags & S.ValueModule ? "namespace" : "const";
-      out[name] = `${kind} ${clean(checker.typeToString(type, undefined, flags))}`;
+      out[name] = `${kind} ${show(type, decl)}`;
       recordSigs(name, type.getCallSignatures());
     } else {
       out[name] = "export";

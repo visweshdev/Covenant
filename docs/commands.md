@@ -42,6 +42,7 @@ flags.
 | `covenant install-hooks` / `install-claude` | Installs only the git hooks / only the Claude Code hooks |
 | `covenant daemon` | The background process behind the fast hooks (started automatically) |
 | `covenant bench run` / `report` | Runs and scores CovenantBench (see [bench/README.md](../bench/README.md)) |
+| `covenant bench replay [repos.txt]` | Judges real repos' recent commits with the CI check, nothing from them executed (`--commits`, `--jobs`, `--only`, `--report`); see [the replay results](../bench/README.md#replay-on-50-real-repositories) |
 
 ## Exit codes
 

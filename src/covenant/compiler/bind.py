@@ -98,6 +98,11 @@ class Binder:
             params["max_kb"] = mb * 1024 if mb else kb or 1024
         elif intent is Intent.KEEP_TESTS:
             assumptions.append("covers deleted test files, removed test cases, new skips and .only")
+        elif intent is Intent.NO_SUPPRESSIONS:
+            kinds = suppression_kinds(span)
+            if kinds:
+                params["kinds"] = kinds
+                assumptions.append(f"checks {' and '.join(kinds)} suppressions only")
         kind = ClauseKind.SEMANTIC_INVARIANT
         return Clause(
             id=self._id(), kind=kind, source_span=span, scope=["the change since the task started"], checker=checker,
@@ -376,6 +381,19 @@ def _budget(span: str) -> dict:
         n = float(m.group(1) or m.group(2))
         params["max_cost_usd"] = int(n) if n == int(n) else n
     return params
+
+
+def suppression_kinds(span: str) -> list[str] | None:
+    """Which suppressions a rule means: "type errors" only the type checker's, "lint" only linters';
+    "warnings" or no qualifier, all (None)."""
+    s = span.lower()
+    typed = bool(re.search(r"\btype\s*(?:check\w*|errors?|hints?)|\bmypy\b|\bpyright\b|type:\s*ignore|ts-ignore|typescript", s))
+    linted = bool(re.search(r"\blint\w*|\bnoqa\b|eslint|pylint|ruff|flake8|\bwarnings?\b|\bcoverage\b", s))
+    if typed and not linted:
+        return ["type"]
+    if linted and not typed and not re.search(r"\bwarnings?\b|\bcoverage\b", s):
+        return ["lint"]
+    return None
 
 
 def _numbers(span: str, unit: str) -> int | None:

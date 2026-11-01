@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -26,11 +27,82 @@ from ..ir import Clause
 from .api_surface import diff_surfaces
 
 EXTRACTOR = Path(__file__).with_name("ts_extract.js")
-DEFAULT_ENTRIES = ["src/index.ts", "src/index.tsx", "index.ts", "lib/index.ts", "src/main.ts"]
+DEFAULT_ENTRIES = ["src/index.ts", "src/index.tsx", "src/index.mts", "source/index.ts", "index.ts", "lib/index.ts",
+                   "src/main.ts", "index.d.ts"]
+BUILD_DIRS = ("dist", "distribution", "build", "lib", "out", "esm", "cjs", "types")
+SOURCE_DIRS = ("src", "source", "lib", "")
+SOURCE_EXTS = (".ts", ".tsx", ".mts", ".cts", ".d.ts", ".d.mts")
 
 
 class TsSurfaceError(RuntimeError):
     pass
+
+
+def _published_paths(data: dict) -> list[str]:
+    """Files package.json points users at: types first, then the JavaScript entry."""
+    found: list[str] = []
+
+    def walk(value, key=""):
+        if isinstance(value, str):
+            if value.startswith(".") or "/" in value or value.endswith((".js", ".ts", ".mjs", ".cjs", ".mts")):
+                found.append(value)
+        elif isinstance(value, dict):
+            # the package root (".") before subpaths; "types" before "import"/"default"
+            items = sorted(value.items(), key=lambda kv: (kv[0] not in (".", "types", "typings"), kv[0] != "import"))
+            for k, v in items:
+                if not k.startswith("./") or k == "./":
+                    walk(v, k)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v, key)
+
+    for key in ("types", "typings"):
+        walk(data.get(key))
+    walk(data.get("exports"))
+    for key in ("module", "main"):
+        walk(data.get(key))
+    return found
+
+
+def _out_to_root(repo_root: Path) -> list[tuple[str, str]]:
+    """(outDir, rootDir) pairs from the repo's tsconfig files, so built paths map back to source."""
+    pairs = []
+    for cfg in sorted(repo_root.glob("tsconfig*.json")):
+        try:
+            text = cfg.read_text(encoding="utf-8")
+            opts = json.loads("\n".join(l for l in text.splitlines() if not l.strip().startswith("//"))).get("compilerOptions", {})
+        except (ValueError, OSError):
+            continue
+        out, root = opts.get("outDir"), opts.get("rootDir")
+        if isinstance(out, str):
+            pairs.append((out.strip("./").rstrip("/"), (root or "src").strip("./").rstrip("/") if root != "." else ""))
+    return pairs
+
+
+def _source_for(repo_root: Path, published: str, pairs: list[tuple[str, str]]) -> str | None:
+    path = published.lstrip("./")
+    stem = path
+    for ext in (".d.mts", ".d.cts", ".d.ts", ".mjs", ".cjs", ".js", ".mts", ".cts", ".tsx", ".ts"):
+        if stem.endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    if (repo_root / path).is_file() and path.endswith(SOURCE_EXTS):  # source or hand-written types in the repo
+        return path
+    candidates = []
+    first, _, rest = stem.partition("/")
+    for out, root in pairs:
+        if out and (stem == out or stem.startswith(out + "/")):
+            candidates.append(f"{root}/{stem[len(out) + 1:]}".lstrip("/"))
+    if first in BUILD_DIRS and rest:
+        candidates += [f"{d}/{rest}".lstrip("/") for d in SOURCE_DIRS]
+        if "/" in rest:  # dist/esm/index.js, dist/src/index.d.ts
+            candidates += [f"{d}/{rest.split('/', 1)[1]}".lstrip("/") for d in SOURCE_DIRS]
+    candidates.append(stem)
+    for cand in candidates:
+        for ext in SOURCE_EXTS:
+            if (repo_root / f"{cand}{ext}").is_file():
+                return f"{cand}{ext}"
+    return None
 
 
 def detect_entries(repo_root: Path) -> list[str]:
@@ -40,10 +112,52 @@ def detect_entries(repo_root: Path) -> list[str]:
         source = data.get("source")
         if isinstance(source, str) and (repo_root / source).is_file():
             return [source]
+        pairs = _out_to_root(repo_root)
+        for published in _published_paths(data):
+            found = _source_for(repo_root, published, pairs)
+            if found:
+                return [found]
     for entry in DEFAULT_ENTRIES:
         if (repo_root / entry).is_file():
             return [entry]
+    found = _workspace_entry(repo_root)
+    if found:
+        return [found]
     raise TsSurfaceError("no TypeScript entry file found; set params.entries")
+
+
+def _workspace_entry(repo_root: Path) -> str | None:
+    """In a monorepo, the published package named like the repo (zod's packages/zod)."""
+    patterns: list[str] = []
+    try:
+        ws = json.loads((repo_root / "package.json").read_text(encoding="utf-8")).get("workspaces")
+        patterns += ws if isinstance(ws, list) else (ws or {}).get("packages", [])
+    except (OSError, ValueError, AttributeError):
+        pass
+    pnpm = repo_root / "pnpm-workspace.yaml"
+    if pnpm.is_file():
+        patterns += [m.strip().strip("'\"") for m in
+                     re.findall(r"^\s*-\s*(.+)$", pnpm.read_text(encoding="utf-8"), re.M)]
+    packages = []
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            continue
+        for pkg_json in sorted(repo_root.glob(f"{pattern.rstrip('/')}/package.json")):
+            try:
+                data = json.loads(pkg_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not data.get("private") and data.get("name"):
+                packages.append((data["name"].rsplit("/", 1)[-1].lower(), pkg_json.parent))
+    named = [d for n, d in packages if repo_root.name.lower().endswith(n)]
+    chosen = named[0] if named else packages[0][1] if len(packages) == 1 else None
+    if chosen is None:
+        return None
+    try:
+        inner = detect_entries(chosen)
+    except TsSurfaceError:
+        return None
+    return f"{chosen.relative_to(repo_root).as_posix()}/{inner[0]}"
 
 
 def extract_full(root: Path, entries: list[str], timeout: float = 300) -> tuple[dict[str, str], dict[str, dict]]:
@@ -137,8 +251,11 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
         evidence = {"symbol": symbol, "before": old, "after": new, "exported_from": entry, "baseline": ref}
         return ViolationReport.for_clause(clause, evidence)
 
-    reports = [report(s, b, a) for s, (b, a) in diff.changed.items() if not compatible(s)]
-    reports += [report(s, b, None) for s, b in diff.removed.items()]
+    def private(symbol: str) -> bool:  # `_name` and `#name` members are internal by convention
+        return symbol.rsplit(":", 1)[-1].rsplit(".", 1)[-1].startswith(("_", "#"))
+
+    reports = [report(s, b, a) for s, (b, a) in diff.changed.items() if not compatible(s) and not private(s)]
+    reports += [report(s, b, None) for s, b in diff.removed.items() if not private(s)]
     if not additive_ok:
         reports += [report(s, None, a) for s, a in diff.added.items()]
     return reports

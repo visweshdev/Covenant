@@ -222,11 +222,21 @@ def _go_sig(rest: str) -> str:
     return f"({', '.join(_go_param_types(params))}) {norm(results)}".strip()
 
 
+EMPTY_STRUCT = "EmptyStruct·"
+
+
 def go_surface(files: Files) -> dict[str, str]:
+    return {k: v.replace(EMPTY_STRUCT, "struct{}") for k, v in _go_surface(files).items()}
+
+
+def _go_surface(files: Files) -> dict[str, str]:
     out: dict[str, str] = {}
     exported = lambda name: bool(name) and name[0].isupper()  # noqa: E731
     for rel, raw in sorted(files.items()):
         src = strip_comments(raw, "go")
+        # `interface{}` is `any`; and an empty `{}` inside a signature would read as the start of the body.
+        src = re.sub(r"\binterface\s*\{\s*\}", "any", src)
+        src = re.sub(r"\bstruct\s*\{\s*\}", EMPTY_STRUCT, src)
         pkg_dir = rel.rsplit("/", 1)[0] if "/" in rel else "."
         prefix = f"{pkg_dir}:"
         for line_block in re.split(r"\n(?=[^\s})])", src):  # a new top-level declaration starts at column 0
@@ -323,6 +333,9 @@ def _rust_module(rel: str) -> str:
     return "::".join(["crate", *parts])
 
 
+HIDDEN = re.compile(r"#\[doc\s*\(\s*hidden\s*\)\]")
+
+
 def rust_surface(files: Files) -> dict[str, str]:
     out: dict[str, str] = {}
     pub = re.compile(r"^(?:#\[[^\]]*\]\s*)*pub\s+(?!\()")
@@ -336,13 +349,13 @@ def rust_surface(files: Files) -> dict[str, str]:
                     continue  # trait impls follow the trait; skip
                 target = m.group(3).split("::")[-1]
                 for mh, _ in blocks(body):
-                    if pub.match(mh.strip()):
+                    if pub.match(mh.strip()) and not HIDDEN.search(mh):
                         fn = _rust_fn(mh)
                         if fn:
                             out[f"{module}::{target}::{fn[0]}"] = fn[1]
                 continue
-            if not pub.match(h):
-                continue
+            if not pub.match(h) or HIDDEN.search(header):
+                continue  # `#[doc(hidden)]` items aren't public API by Rust convention
             fn = _rust_fn(h)
             if fn and re.match(r"^(?:#\[[^\]]*\]\s*)*pub\s+(?:const\s+|async\s+|unsafe\s+|extern\s+\S+\s+)*fn\b", h):
                 out[f"{module}::{fn[0]}"] = fn[1]
@@ -511,6 +524,36 @@ def locate(symbol: str, language: str, files: Files, enclosing_only: bool = Fals
 SURFACES: dict[str, Callable[[Files], dict[str, str]]] = {"go": go_surface, "rust": rust_surface, "java": java_surface}
 
 
+def compatible(before: str, after: str, language: str) -> bool:
+    """A changed item every existing caller still compiles against.
+
+    Go: a function gains a trailing variadic parameter (`f(a)` still calls `f(a, opts...)`).
+    Rust: a function drops trait bounds from its where clause (it accepts more types)."""
+    if language == "go":
+        b, a = re.match(r"^(func\S*|method) \((.*?)\)(.*)$", before), re.match(r"^(func\S*|method) \((.*?)\)(.*)$", after)
+        if b and a and b.group(1) == a.group(1) and b.group(3) == a.group(3):
+            old, new = split_top(b.group(2)), split_top(a.group(2))
+            return len(new) == len(old) + 1 and new[:-1] == old and new[-1].startswith("...") and not any(
+                p.startswith("...") for p in old)
+        return False
+    if language == "rust" and " where " in before:
+        b_head, b_where = before.split(" where ", 1)
+        a_head, _, a_where = after.partition(" where ")
+        if b_head != a_head:
+            return False
+
+        def bounds(where: str) -> dict[str, set[str]]:
+            out: dict[str, set[str]] = {}
+            for clause in split_top(where):
+                ty, _, bs = clause.partition(":")
+                out[ty.strip()] = {x.strip() for x in bs.split("+") if x.strip()}
+            return out
+
+        old, new = bounds(b_where), bounds(a_where)
+        return all(ty in old and bs <= old[ty] for ty, bs in new.items())
+    return False
+
+
 def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list[ViolationReport]:
     params = clause.params
     language = params.get("language") or detect_language(repo_root)
@@ -539,8 +582,9 @@ def verify(clause: Clause, repo_root: Path, baseline: str | None = None) -> list
             evidence["file"], evidence["line"] = place
         return ViolationReport.for_clause(clause, evidence)
 
-    reports = [report(s, b, a) for s, (b, a) in diff.changed.items()]
+    additive_ok = params.get("allow_additive", True)
+    reports = [report(s, b, a) for s, (b, a) in diff.changed.items() if not (additive_ok and compatible(b, a, language))]
     reports += [report(s, b, None) for s, b in diff.removed.items()]
-    if not params.get("allow_additive", True):
+    if not additive_ok:
         reports += [report(s, None, a) for s, a in diff.added.items()]
     return reports

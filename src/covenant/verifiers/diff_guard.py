@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections import Counter
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -36,6 +37,9 @@ class Change:
     old_path: str | None = None
     _repo: Path = field(default=Path("."), repr=False)
     _base: str = field(default="HEAD", repr=False)
+    # Hunks from one `git diff -U0` shared by every change of a check: (old_count, new_start, new_lines)
+    _hunks: list[tuple[int, int, list[str]]] | None = field(default=None, repr=False)
+    _removed: list[str] = field(default_factory=list, repr=False)  # removed lines of the whole diff
 
     def old_text(self) -> str | None:
         if self.status == "A":
@@ -57,6 +61,8 @@ class Change:
 
     def added_lines(self) -> list[tuple[int, str]]:
         """(1-based line number, text) of lines that are new in the working tree."""
+        if self._hunks is not None:
+            return [(start + i, line) for _, start, lines in self._hunks for i, line in enumerate(lines)]
         new = self.new_text()
         if new is None:
             return []
@@ -72,6 +78,8 @@ class Change:
         return out
 
     def changed_line_count(self) -> int:
+        if self._hunks is not None:
+            return sum(max(old_count, len(lines)) for old_count, _, lines in self._hunks)
         old, new = (self.old_text() or "").splitlines(), (self.new_text() or "").splitlines()
         matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
         return sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal")
@@ -104,10 +112,61 @@ def changes(repo: Path, base: str, exclude: list[str] | None = None) -> list[Cha
         else:
             out.append(Change(fields[i + 1], status if status in "AMD" else "M", None, repo, base))
             i += 2
+    removed: list[str] = []
+    hunks = _diff_hunks(repo, base, removed)
+    for c in out:
+        c._removed = removed
+        if c.status != "D":
+            c._hunks = hunks.get(c.path, [])  # absent: binary, or renamed without edits
     for path in _git(repo, "ls-files", "--others", "--exclude-standard", "-z").split("\0"):
         if path:
-            out.append(Change(path, "A", None, repo, base))
+            out.append(Change(path, "A", None, repo, base))  # untracked: every line is new
     return [c for c in out if not any(g.fullmatch(c.path) for g in skip)]
+
+
+_HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def _unquote(path: str) -> str:
+    """git quotes paths with unusual characters C-style: "b/caf\\303\\251.txt"."""
+    if not (path.startswith('"') and path.endswith('"')):
+        return path
+    raw = path[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape")
+    return raw.encode("latin-1", "replace").decode("utf-8", "replace")
+
+
+def _diff_hunks(repo: Path, base: str, removed: list[str] | None = None) -> dict[str, list[tuple[int, int, list[str]]]]:
+    """Added lines per file from one `git diff -U0` (working tree versus base); binary files are left out.
+    Removed lines, from every file, are appended to `removed` when given.
+
+    Much faster than diffing each file in Python, which is quadratic on big files."""
+    r = subprocess.run(["git", "-C", str(repo), "-c", "core.quotepath=false", "diff", "-U0", "-M", "--no-color",
+                        "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", base, "--"],
+                       capture_output=True)
+    if r.returncode != 0:
+        return {}
+    out: dict[str, list[tuple[int, int, list[str]]]] = {}
+    current: list | None = None
+    lines: list[str] = []
+    in_header = False
+    for raw in r.stdout.decode("utf-8", errors="replace").split("\n"):
+        if raw.startswith("diff --git "):
+            in_header, current = True, None
+        elif in_header and raw.startswith("+++ "):
+            target = _unquote(raw[4:].rstrip("\r\t"))
+            current = out.setdefault(target[2:], []) if target.startswith("b/") else None
+        elif raw.startswith("@@"):
+            in_header = False
+            m = _HUNK.match(raw)
+            if m and current is not None:
+                lines = []
+                old_count = int(m.group(1)) if m.group(1) is not None else 1
+                current.append((old_count, int(m.group(2)), lines))
+        elif not in_header and raw.startswith("+") and current:
+            lines.append(raw[1:].rstrip("\r"))
+        elif not in_header and raw.startswith("-") and removed is not None:
+            removed.append(raw[1:].rstrip("\r"))
+    return out
 
 
 def _base(clause: Clause, baseline: str | None) -> str:
@@ -172,6 +231,8 @@ _PLACEHOLDER = re.compile(r"(?i)x{4,}|\*{4,}|example|placeholder|changeme|change
 
 
 def _looks_random(value: str) -> bool:
+    if re.fullmatch(r"[a-z]+(?:[-_. ][a-z]+)*", value):
+        return False  # lowercase words: 'private-token', 'my_secret_value'
     kinds = sum(bool(re.search(rx, value)) for rx in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
     return len(set(value)) >= 8 and kinds >= 2
 
@@ -230,6 +291,7 @@ _SKIP = re.compile(
     r"\b(?:it|test|describe)\.(?:skip|todo)\s*\(|\bx(?:it|test|describe)\s*\(|"
     r"\bt\.Skip(?:f|Now)?\(|#\[ignore\]|@(?:Disabled|Ignore)\b",
 )
+_PY_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(", re.M)
 _FOCUS = re.compile(r"\b(?:it|test|describe)\.only\s*\(|\bf(?:it|describe)\s*\(")
 
 
@@ -253,8 +315,40 @@ def test_guard(clause: Clause, repo: Path, baseline: str | None = None) -> list[
         if after < before:
             reports.append(_report(clause, f"{c.path} has {before - after} fewer test(s); restore them or ask the human",
                                    target=c.path, change="tests removed", before=before, after=after))
+        old_defs = set(_PY_DEF.findall(old))
+        new_lines = new.splitlines()
+
+        def on_new_test(lineno: int) -> bool:
+            """A skip decorator on a test that is itself new: nothing that ran before is skipped."""
+            # Walk past the rest of the decorator stack (multi-line conditions, long parametrize
+            # tables) to the function it decorates.
+            depth = 0
+            for text in new_lines[lineno - 1:lineno + 200]:
+                stripped = text.strip()
+                if depth == 0 and stripped and not stripped.startswith(("@", "#", ")", "]", "}")):
+                    m = _PY_DEF.match(text)
+                    if m:
+                        return m.group(1) not in old_defs
+                    k = re.match(r"\s*class\s+(\w+)", text)  # a skipped test class that is itself new
+                    return bool(k) and not re.search(rf"^\s*class\s+{k.group(1)}\b", old, re.M)
+                depth = max(0, depth + sum(stripped.count(ch) for ch in "([{") - sum(stripped.count(ch) for ch in ")]}"))
+            return False
+
+        def inside_new_test(lineno: int) -> bool:
+            """`pytest.skip(...)` in the body of a test that is itself new."""
+            indent = len(new_lines[lineno - 1]) - len(new_lines[lineno - 1].lstrip())
+            for text in reversed(new_lines[: lineno - 1]):
+                m = _PY_DEF.search(text)
+                if m and len(text) - len(text.lstrip()) < indent:
+                    return m.group(1) not in old_defs
+            return False
+
+        def new_test_skip(lineno: int, text: str) -> bool:
+            return on_new_test(lineno) if text.lstrip().startswith("@") else inside_new_test(lineno)
+
         for label, rx in (("skipped", _SKIP), ("focused with .only", _FOCUS)):
-            added = [(n, t) for n, t in c.added_lines() if rx.search(t)]
+            added = [(n, t) for n, t in c.added_lines() if rx.search(t)
+                     and not (label == "skipped" and c.path.endswith(".py") and new_test_skip(n, t))]
             if len(rx.findall(new)) > len(rx.findall(old)) and added:
                 n, t = added[0]
                 reports.append(_report(clause, f"Don't mark tests as {label}; fix the code so they pass",
@@ -293,11 +387,35 @@ _DEBUG: list[tuple[str, re.Pattern[str]]] = [(exts, re.compile(rx)) for exts, rx
 ]]
 _PRINT = re.compile(r"^\s*print\(")
 
-_SUPPRESS = re.compile(
-    r"#\s*type:\s*ignore|#\s*noqa\b|#\s*pylint:\s*disable|#\s*pragma:\s*no\s*cover|#\s*mypy:\s*ignore|"
-    r"//\s*@ts-(?:ignore|nocheck|expect-error)|eslint-disable|@SuppressWarnings|#!?\[allow\(|"
-    r"//\s*nolint|#\s*rubocop:\s*disable|@phpstan-ignore|NOSONAR|//\s*NOLINT|@SuppressLint"
-)
+# What a suppression silences: the type checker, a linter, or coverage. "Don't silence type errors"
+# checks only the first; "don't suppress warnings" checks all (the `kinds` param).
+_SUPPRESS_KINDS: dict[str, re.Pattern[str]] = {
+    "type": re.compile(r"#\s*type:\s*ignore|#\s*mypy:\s*ignore|#\s*pyright:\s*ignore|//\s*@ts-(?:ignore|nocheck|expect-error)|"
+                       r"@phpstan-ignore|@psalm-suppress"),
+    "lint": re.compile(r"#\s*noqa\b|#\s*pylint:\s*disable|eslint-disable|@SuppressWarnings|#!?\[allow\(|//\s*nolint|"
+                       r"#\s*rubocop:\s*disable|NOSONAR|//\s*NOLINT|@SuppressLint|biome-ignore|#\s*ruff:\s*noqa"),
+    "coverage": re.compile(r"#\s*pragma:\s*no\s*cover|/\*\s*(?:istanbul|c8|v8)\s+ignore"),
+}
+_SUPPRESS = re.compile("|".join(rx.pattern for rx in _SUPPRESS_KINDS.values()))
+# Type-test files, where `@ts-expect-error` is the assertion ("this call must not type-check").
+TYPE_TEST_FILES = ["test-d/**", "**/test-d/**", "**/*.test-d.ts", "**/*.test-d.tsx", "**/*.tst.ts", "type-tests/**",
+                   "**/type-tests/**", "types/test/**", "dtslint/**", "**/*-tests.ts"]
+# Text that only mentions code (docs, changelogs) and data a tool reads as input (a formatter's test cases).
+PROSE_EXTS = (".md", ".mdx", ".rst", ".txt", ".adoc", ".html", ".htm", ".tex", ".ipynb")
+DATA_FILES = ["**/tests/data/**", "**/test/data/**", "tests/data/**", "test/data/**", "**/fixtures/**", "fixtures/**",
+              "**/testdata/**", "testdata/**", "**/__snapshots__/**", "**/*.snap"]
+# Programs whose output is the point: build and release scripts, CLIs, examples.
+SCRIPT_FILES = ["bin/**", "scripts/**", "script/**", "tools/**", "tasks/**", ".meta/**", ".github/**", "action/**",
+                "examples/**", "example/**", "docs/**", "doc/**", "benchmarks/**", "bench/**", "**/__main__.py",
+                "**/cli.py", "**/cli/**", "build/**", "setup.py", "noxfile.py", "tasks.py", "Makefile"]
+
+
+def _is_comment(ext: str, text: str) -> bool:
+    """A line of comment or doc text, where a debug call is an example, not code."""
+    s = text.lstrip()
+    if ext in (".py", ".rb"):
+        return s.startswith("#") or s.startswith(">>> ") or s.startswith("... ")
+    return s.startswith(("//", "/*", "* ", "*\t")) or s == "*"
 
 
 def _line_check(clause: Clause, repo: Path, baseline: str | None, match: Callable[[str, str], str | None],
@@ -319,23 +437,92 @@ def no_debug_code(clause: Clause, repo: Path, baseline: str | None = None) -> li
 
     def match(path: str, text: str) -> str | None:
         ext = "." + path.rsplit(".", 1)[-1] if "." in path else ""
+        if _is_comment(ext, text):
+            return None
         for exts, rx in _DEBUG:
             if ext in exts.split() and rx.search(text):
                 return "debug code"
-        if include_print and ext == ".py" and _PRINT.search(text):
+        if include_print and ext == ".py" and _PRINT.search(text) and "file=" not in text:
             return "print call"
         return None
 
-    return _line_check(clause, repo, baseline, match, "Remove the leftover debug code at {path}:{line}", skip_tests=True)
+    reports = []
+    for c in changes(repo, _base(clause, baseline), clause.params.get("exclude")):
+        if is_test_file(c.path) or c.path.endswith(PROSE_EXTS) or is_test_file(c.path, DATA_FILES + SCRIPT_FILES):
+            continue  # a script's output and a doc's example aren't leftovers
+        added = c.added_lines()
+        hits = [(n, t, k) for n, t in added if (k := match(c.path, t))]
+        if not hits:
+            continue
+        in_comment = _block_comment_lines(c.new_text() or "", c.path)
+        for lineno, text, kind in hits:
+            if lineno not in in_comment:
+                reports.append(_report(clause, f"Remove the leftover debug code at {c.path}:{lineno}",
+                                       target=c.path, line=lineno, code=text.strip()[:120], kind=kind))
+    return reports
+
+
+def _block_comment_lines(text: str, path: str) -> set[int]:
+    """Line numbers inside /* ... */ comments (JSDoc examples often have no leading `*`) or Python docstrings."""
+    if path.endswith(".py"):
+        spans = [m.span() for m in re.finditer(r"(\"\"\"|''')[\s\S]*?\1", text)]
+    elif path.endswith((".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".php")):
+        spans = [m.span() for m in re.finditer(r"/\*[\s\S]*?\*/", text)]
+    else:
+        return set()
+    lines: set[int] = set()
+    for start, end in spans:
+        lines.update(range(text.count("\n", 0, start) + 1, text.count("\n", 0, end) + 2))
+    return lines
 
 
 def no_suppressions(clause: Clause, repo: Path, baseline: str | None = None) -> list[ViolationReport]:
-    def match(path: str, text: str) -> str | None:
-        m = _SUPPRESS.search(text)
-        return m.group(0) if m else None
+    kinds = clause.params.get("kinds") or list(_SUPPRESS_KINDS)
+    patterns = [_SUPPRESS_KINDS[k] for k in kinds if k in _SUPPRESS_KINDS]
 
-    return _line_check(clause, repo, baseline, match,
-                       "Fix the warning instead of silencing it at {path}:{line}, or ask the human", skip_tests=False)
+    def match(path: str, text: str) -> str | None:
+        if path.endswith(PROSE_EXTS) or is_test_file(path, DATA_FILES):
+            return None
+        in_tests = is_test_file(path) or is_test_file(path, TYPE_TEST_FILES)
+        for rx in patterns:
+            for m in rx.finditer(text):
+                if "`" in text[: m.start()][-3:]:
+                    continue  # quoted in a comment or docstring: `# type: ignore`
+                hit = m.group(0)
+                # A test that passes a wrong type on purpose names the error it expects, and
+                # `@ts-expect-error` fails by itself once the error goes away: both are assertions.
+                if in_tests and ("expect-error" in hit or ("type" in hit and text[m.end():].startswith("["))):
+                    continue
+                return hit
+        return None
+
+    found = changes(repo, _base(clause, baseline), clause.params.get("exclude"))
+    # A suppression the diff also removes was edited (`# type: ignore` -> `# type: ignore[attr]`),
+    # moved or reformatted, not added: each is matched against a removed line with the same code.
+    removed = found[0]._removed if found else []
+    pool = Counter(_suppressed_code(line) for line in removed if _SUPPRESS.search(line))
+    reports = []
+    for c in found:
+        for lineno, text in c.added_lines():
+            kind = match(c.path, text)
+            if not kind:
+                continue
+            key = _suppressed_code(text)
+            if pool[key] > 0:
+                pool[key] -= 1
+                continue
+            reports.append(_report(clause, f"Fix the warning instead of silencing it at {c.path}:{lineno}, or ask the human",
+                                   target=c.path, line=lineno, code=text.strip()[:120], kind=kind))
+    return reports
+
+
+def _suppressed_code(line: str) -> str:
+    """The code a suppression sits on, without the suppression: `x = f()  # type: ignore[misc]` -> `x = f()`.
+    A suppression on a line of its own keeps its own text."""
+    m = _SUPPRESS.search(line)
+    code = line[: m.start()] if m else line
+    code = re.sub(r"(#|//|/\*)\s*$", "", code.strip()).strip()
+    return " ".join((code or line).split())
 
 
 # ----- large_files -------------------------------------------------------------------------

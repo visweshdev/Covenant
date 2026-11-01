@@ -74,7 +74,8 @@ from then on and the task's history is kept.
 | "don't delete or skip tests" | `test_guard` |
 | "keep the change under 200 lines", "touch at most 3 files" | `diff_budget` |
 | "no leftover debug prints" | `no_debug_code` |
-| "don't silence type errors" | `no_suppressions` |
+| "don't silence type errors" | `no_suppressions` (type-checker suppressions only: `# type: ignore`, `@ts-ignore`, ...) |
+| "don't disable lint rules", "don't suppress warnings" | `no_suppressions` (lint only / everything, coverage pragmas included) |
 | "don't commit files over 5 MB" | `large_files` |
 | "run tests before committing", "push at most once", "run tests within 5 steps of an edit" | `trace_monitor` |
 | "never force push", "don't deploy", "don't install packages", "no network access", "don't read .env" | `command_guard` |

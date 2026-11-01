@@ -162,6 +162,72 @@ sessions"` and to `curl` a README from raw.githubusercontent.com. Both commands 
 before they ran, the table kept its rows, and the agent reported both refusals. `covenant
 explain` gave the reason and the fix for each.
 
+## Replay on 50 real repositories
+
+The trials above need an agent per task. The replay scales the other way: it takes the last 30
+commits of **50 popular repositories** (25 Python, 10 TypeScript/JavaScript, 8 Go, 5 Rust,
+2 Java; list in [`replay/repos.txt`](replay/repos.txt)) and judges each real commit with the CI
+check, against rules compiled at the commit before them:
+
+> Don't change public APIs, don't commit secrets or API keys, don't delete or skip tests, don't
+> add new dependencies, no leftover debug prints, don't silence type errors, don't commit files
+> over 5 MB, and run tests before committing.
+
+Maintainers' commits are reviewed and mostly fine, so every flagged commit is either a real
+break of one of those rules or a false alarm to fix. Nothing from the repositories is run:
+checkers read source with parsers and git.
+
+```bash
+covenant bench replay bench/replay/repos.txt --jobs 6     # clones into replay-work/
+covenant bench replay --report replay-results.jsonl
+```
+
+| | Before | After |
+|---|---|---|
+| Commits judged | 1,446 | 1,446 |
+| Crashes | 0 | 0 |
+| Commits flagged | 141 (9.8%) | **75 (5.2%)** |
+| Reports | 490 | 191 |
+| Repos whose API rule couldn't be checked | 6 | **0** |
+| TypeScript repos with an API check | 4 of 10 | **10 of 10** |
+| Seconds per commit (median / p95) | 3.7 / 12.8 | **2.2 / 7.1** |
+
+Full results: [`replay/results-before.jsonl`](replay/results-before.jsonl) and
+[`replay/results-after.jsonl`](replay/results-after.jsonl).
+
+**The 75 flagged commits, reviewed one by one:** 72 are real breaks of the rules as written,
+2 are false alarms, and 1 is unclear.
+
+- Real: new dependencies (15 commits, such as `tzdata` in dateutil and `cython` in filelock);
+  tests removed or deleted (19); a test skipped (loguru); new `# type: ignore` and
+  `# pyright: ignore` in library code (14); API changes (26), such as ofetch's
+  `refactor!:` removals, clsx's `break:` commit, mux's changed `Route.Use`, log's methods moved
+  behind `#[cfg(test)]`, and magic-string's public fields turned `readonly` or `Map`.
+- False alarms left: werkzeug's "add error code to bare type ignore" (4 edited ignores the
+  matcher can't pair), and a Rust return lifetime that got longer (`&str` → `&'k str`), which is
+  compatible.
+- Unclear: logrus's `Termios` type, removed while its OS build constraints were reworked.
+
+What the replay found and fixed (each has a regression test in `tests/test_replay_findings.py`):
+
+| Found on | Problem | Fix |
+|---|---|---|
+| tenacity, typer | 8–13 s per commit: the API reader ran `git show` once per exported name | Files at a commit are read once and cached; one `git ls-tree` answers "is this module there?" |
+| ky | Added lines came from a Python diff, quadratic on a 7,000-line test file | One `git diff -U0` per check |
+| click, jinja, flask, werkzeug | The default test command was `pip install tox` | Install steps and shell plumbing (`sed`, `xargs`) aren't test commands |
+| serde_json, log, anyhow, thiserror, reqwest | Rust repos got `python -m pytest` because they have a `tests/` folder | Only Python projects get pytest from `tests/` |
+| ky, chalk, axios, execa, clsx, zod | No TypeScript entry found, so "don't change public APIs" was unenforceable | Entries come from `package.json` `types`/`exports`/`main`, mapped back to source through `tsconfig` `outDir`/`rootDir`; hand-written `.d.ts`; monorepo packages |
+| execa | Huge types printed differently on each side (TypeScript cuts them near a million characters) | Very long or cut types are compared by their declaration text |
+| click, tenacity, arrow, attrs | Compatible changes reported: `ctx: Context` → `Context \| None`, a new base class, `ClassVar[...]`, `@override`, `date` vs an alias `dt_date`, a lazily loaded submodule | Widening parameter types, narrowing return types, added bases and typing-only decorators are compatible; import aliases resolve to what they name |
+| werkzeug (second run) | On Windows, `from .wrappers import Request` matched `request.py`, making a class look like a module | Module lookups match file names case-exactly |
+| chi, testify | Go `interface{}` → `any` reported; `interface{}`'s braces cut signatures short, hiding later parameters | `interface{}` reads as `any`; new trailing variadic parameters are compatible |
+| serde_json, log | Rust `#[doc(hidden)]` items and loosened bounds reported | Hidden items aren't API; dropping bounds is compatible |
+| ky, chalk, werkzeug, black | "Don't silence type errors" flagged `eslint-disable`, `@ts-expect-error` in type tests, edited ignores, and ignores quoted in docs and changelogs | Type rules check type suppressions only; edits, moves, prose, fixtures and test assertions aren't new suppressions |
+| ky, clsx, tqdm | `console.log` in JSDoc examples and in build scripts counted as leftover debug code | Comments, docstrings, scripts and CLIs are skipped |
+| click, platformdirs, filelock, structlog | A `skipif` on a brand-new test (or class) counted as skipping a test | Only skips on tests that existed before count |
+| click, jinja | pip-compile lockfiles gaining transitive pins counted as new dependencies | Compiled requirements are lockfiles; the `.in` file is what's declared |
+| execa | `const secret = 'private-token'` in a test flagged as a secret | Plain lowercase words aren't secrets |
+
 ## Adding tasks
 
 The proposal targets about 200 tasks from real open-source repos, using commits after the models' training cutoff, with each ground-truth Covenant written and cross-checked by two annotators. These six synthetic tasks exercise the format and every check type. Real-repo tasks need that curation work.

@@ -116,6 +116,14 @@ def _parser() -> argparse.ArgumentParser:
     brun.add_argument("--out", default="bench-results.jsonl")
     brep = bench.add_parser("report", help="summarize result files")
     brep.add_argument("results", nargs="+")
+    brpl = bench.add_parser("replay", help="judge real repos' recent commits with the CI check (nothing from them runs)")
+    brpl.add_argument("repos", nargs="?", default="bench/replay/repos.txt", help="file with one GitHub URL per line")
+    brpl.add_argument("--work", default="replay-work", help="where the clones go")
+    brpl.add_argument("--out", default="replay-results.jsonl")
+    brpl.add_argument("--commits", type=int, default=30)
+    brpl.add_argument("--jobs", type=int, default=4)
+    brpl.add_argument("--only", help="comma-separated owner/name repos to run")
+    brpl.add_argument("--report", metavar="RESULTS", help="summarize a results file instead of running")
     srv = sub.add_parser("serve", help="run the hook server (HTTP hooks; keeps state away from the agent)")
     srv.add_argument("--port", type=int, default=8787)
     srv.add_argument("--bind", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
@@ -254,6 +262,12 @@ def _bench(args: argparse.Namespace) -> int:
     from .bench import runner
     from .bench.task import load_tasks
 
+    if args.bench_cmd == "replay":
+        from .bench import replay
+        argv = ["--report", args.report] if args.report else [
+            args.repos, "--work", args.work, "--out", args.out, "--commits", str(args.commits), "--jobs", str(args.jobs),
+            *(["--only", args.only] if args.only else [])]
+        return replay.main(argv)
     if args.bench_cmd == "report":
         print(runner.render_report(runner.summarize(runner.read_results([Path(p) for p in args.results]))))
         return 0

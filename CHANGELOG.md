@@ -8,6 +8,31 @@
 
 ## Unreleased
 
+- **Replayed on 50 real repositories** (`covenant bench replay`): the last 30 commits of 50
+  popular Python, TypeScript, Go, Rust and Java projects (1,446 commits), judged by the CI check.
+  Flagged commits fell from 141 to 75, of which 72 are real rule breaks; every TypeScript repo now
+  gets an API check (4 of 10 before). What it found and fixed (see
+  [bench/README.md](bench/README.md#replay-on-50-real-repositories)):
+  - checks run about 3× faster: Python API extraction reads each file once per commit instead of
+    once per exported name, and added lines come from one `git diff` instead of a Python diff;
+  - test commands: install steps (`pip install tox`), shell plumbing (`sed`, `xargs`) and
+    `pytest` in Rust repos are no longer picked;
+  - TypeScript entry points are found from `package.json` (`types`, `exports`, `main`) mapped
+    back to source through `tsconfig` `outDir`/`rootDir`, or hand-written `.d.ts` files;
+  - API changes that every caller survives aren't reported: a parameter type that widens
+    (`A` → `A | None`), a return type that narrows, a new base class, `ClassVar`, `@override`,
+    import aliases of the same type, Go `interface{}` → `any` and new variadic parameters, Rust
+    bounds that loosen and `#[doc(hidden)]` items, TypeScript `_private` members;
+  - Go signatures with `interface{}` were cut short at its brace, hiding later parameters;
+  - very long TypeScript types (cut by the compiler near a million characters) are compared by
+    their declaration, so they no longer differ between runs;
+  - module lookups match file names case-exactly (on Windows a class looked like a module);
+  - "don't silence type errors" checks type-checker suppressions only, not lint ones;
+    suppressions that were edited or moved, quoted in docs, in test fixtures, or used as test
+    assertions (`@ts-expect-error`, `# type: ignore[code]` in tests) aren't new ones;
+  - debug-code checks skip comments, doc examples, scripts and CLIs; a `skipif` on a brand-new
+    test isn't a skipped test; compiled requirements (pip-compile, uv) are lockfiles;
+  - secret scanning ignores values that are plain lowercase words.
 - Redesigned README, with the reference split into [docs/](docs/README.md) pages.
 - Installers install from PyPI by default (`--github` / `-GitHub` for the main branch).
 

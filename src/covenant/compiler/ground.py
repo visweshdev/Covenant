@@ -159,7 +159,7 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
                 # `${{ matrix.x }}` is filled in by GitHub Actions; such a command can't run here.
                 # A `{...}`/`[...]` line is a YAML value (a matrix entry), not a command.
                 if (cmd and TEST_RUNNERS.search(cmd) and not cmd.startswith(("#", "-", "name:", "uses:", "{", "["))
-                        and "${{" not in cmd):
+                        and "${{" not in cmd and not _INSTALL.match(cmd) and not _PLUMBING.match(cmd)):
                     found.append((cmd, f".github/workflows/{wf.name}"))
     makefile = root / "Makefile"
     if makefile.is_file() and re.search(r"^test\s*:", makefile.read_text(encoding="utf-8", errors="ignore"), re.M):
@@ -176,7 +176,13 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
         except ValueError:
             pass
     pyproject = root / "pyproject.toml"
-    has_pytest = (root / "pytest.ini").is_file() or (root / "tests").is_dir()
+    # A tests/ folder means pytest only in a Python project (Rust and Go repos have one too).
+    other_language = any((root / m).is_file() for m in ("Cargo.toml", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts",
+                                                        "package.json"))
+    python_project = any((root / m).is_file() for m in ("pyproject.toml", "setup.py", "setup.cfg", "tox.ini"))
+    python_tests = (root / "tests").is_dir() and (
+        python_project or not other_language or any((root / "tests").rglob("*.py")))
+    has_pytest = (root / "pytest.ini").is_file() or python_tests
     if pyproject.is_file():
         try:
             has_pytest |= "pytest" in tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {})
@@ -190,6 +196,17 @@ def find_test_commands(root: Path) -> list[tuple[str, str]]:
     # Best first: the main test suite over type checks and linters, then commands this
     # machine can run (a CI step may use a tool, like uv or tox, that isn't installed here).
     return sorted(unique.items(), key=lambda item: (_side_check(item[0]), not _runnable(item[0])))
+
+
+# Shell plumbing that mentions a runner (`sed -i s/vitest/.../`, `xargs ... pytest`, `echo`) isn't the suite.
+_PLUMBING = re.compile(r"(?:sed|xargs|echo|printf|cat|grep|find|ls|cd|export|set|cp|mv|rm|mkdir|touch|curl|wget|git|"
+                       r"if|for|while|test)\b|\[")
+
+
+# Installing a test tool (`pip install tox`, `npm ci`) mentions a runner but runs no tests.
+_INSTALL = re.compile(
+    r"(?:sudo\s+)?(?:(?:python3?|py)\s+-m\s+)?(?:pip3?|pipx|uv\s+(?:pip|tool)|poetry|pdm|conda|mamba|apt(?:-get)?|brew|choco|"
+    r"npm|yarn|pnpm|bun|cargo|go|gem|dotnet|uv)\s+(?:install|add|ci|sync|get|update|upgrade)\b", re.I)
 
 
 _SIDE_CHECKS = re.compile(r"--mypy|\bmypy\b|\bpyright\b|\bruff\b|\bflake8\b|\blint\b|\bcoveralls\b|--collect-only|benchmark|codspeed|"

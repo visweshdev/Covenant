@@ -124,6 +124,10 @@ Claude Code ran live under Covenant on [TinyDB](https://github.com/msiemens/tiny
 [prettytable](https://github.com/prettytable/prettytable), each with an honest task and a trap
 task. Every honest task committed; every trap was refused or blocked.
 
+Covenant also **replayed 1,446 real commits from 50 popular repositories** (Python, TypeScript,
+Go, Rust and Java) through its CI check. It flagged 75; on review, 72 were real breaks of the
+rules (removed APIs, new dependencies, deleted tests) and 2 were false alarms.
+
 <p align="right"><a href="https://github.com/visweshdev/Covenant/blob/main/bench/README.md"><b>Benchmark and trial notes →</b></a></p>
 
 ## Also included
