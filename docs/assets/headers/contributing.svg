@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240" role="img" aria-label="Contributing: Setup, tests, and how to add a checker.">
+  <title>Contributing</title>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#f4efe6" opacity="0.07"/></pattern>
+    <radialGradient id="glow" cx="86%" cy="50%" r="45%"><stop offset="0" stop-color="#b5452f" stop-opacity="0.28"/><stop offset="1" stop-color="#b5452f" stop-opacity="0"/></radialGradient>
+    <filter id="brush" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="4"/><feDisplacementMap in="SourceGraphic" scale="3.2"/></filter>
+    <clipPath id="c"><rect width="1200" height="240" rx="22"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="1200" height="240" fill="#1d1b19"/>
+    <rect width="1200" height="240" fill="url(#dots)"/>
+    <rect width="1200" height="240" fill="url(#glow)"/>
+    <rect y="234" width="1200" height="6" fill="#b5452f"/>
+    <g transform="translate(905 30) scale(8.2)" fill="none" stroke="#e0684f" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" color="#e0684f"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></g>
+  </g>
+  <g transform="translate(52 46) scale(0.46)"><g filter="url(#brush)" fill="none" stroke-linecap="round"><g transform="translate(4 0) rotate(-6 58 60)"><path d="M 83.3 37.3 A 34 34 0 1 0 83.3 82.7" stroke="#f4efe6" stroke-width="17"/><path d="M 91 45.5 C 92.2 53, 92.4 66, 91.3 74.5" stroke="#e0684f" stroke-width="10"/></g></g></g>
+  <text x="114" y="80" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2.4" fill="#e0684f">COVENANT</text>
+  <text x="52" y="158" font-family="Georgia, 'Iowan Old Style', 'Palatino Linotype', serif" font-size="62" fill="#f4efe6" letter-spacing="-0.5">Contributing</text>
+  <text x="54" y="198" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="20" fill="#a59b8c">Setup, tests, and how to add a checker.</text>
+  
+</svg>

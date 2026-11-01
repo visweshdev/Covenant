@@ -1,6 +1,6 @@
-<sub>[Covenant](../README.md) › CovenantBench</sub>
+<p align="center"><img src="../docs/assets/headers/bench.svg" width="100%" alt="CovenantBench: does Covenant cut violations without costing task success?"></p>
 
-# 📊 CovenantBench
+<p align="center"><sub><a href="../README.md">Covenant</a> › <a href="../docs/README.md">Docs</a> › CovenantBench</sub></p>
 
 Measures whether Covenant cuts constraint violations without costing task success.
 
@@ -9,12 +9,14 @@ Measures whether Covenant cuts constraint violations without costing task succes
 | Instruction alone | 1.17 | 1.0 |
 | **With Covenant** | **0.0** | **1.0** |
 
-Plus live trials of Claude Code on four real repos: every honest task committed, every trap
-was refused or blocked.
+Plus live trials of Claude Code on four real repos (every honest task committed, every trap
+was refused or blocked) and a replay of **1,446 real commits from 50 repositories**, where 72 of
+75 flagged commits were real rule breaks.
 
 **On this page:** [Tasks](#tasks) · [Run](#run) · [Metrics](#metrics) ·
 [Results](#results-with-the-scripted-agent-6-tasks) · [Trial on a real repo](#trial-on-a-real-repo) ·
-[Live trials on three more repos](#live-trials-on-three-more-repos) · [Adding tasks](#adding-tasks)
+[Live trials on three more repos](#live-trials-on-three-more-repos) ·
+[Replay on 50 real repositories](#replay-on-50-real-repositories) · [Adding tasks](#adding-tasks)
 
 ---
 

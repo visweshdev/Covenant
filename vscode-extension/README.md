@@ -1,8 +1,6 @@
-<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/logo.png" width="96" alt="Covenant logo"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/headers/vscode.svg" width="100%" alt="Covenant for VS Code: see and manage the rules your agents follow, in the editor."></p>
 
-<h1 align="center">Covenant for VS Code</h1>
-
-<p align="center">See and manage the rules <a href="https://github.com/visweshdev/Covenant">Covenant</a> enforces on coding agents, right in the editor.</p>
+<p align="center">See and manage the rules <a href="https://github.com/visweshdev/Covenant">Covenant</a> enforces on coding agents, right in the editor. <a href="https://github.com/visweshdev/Covenant/blob/main/docs/README.md">Covenant docs</a></p>
 
 ---
 
@@ -49,6 +47,9 @@ Problems are placed at:
 | Covenant: Approve Rules and Start Task | Pins the current `covenant.yaml` and baseline commit and starts a fresh task |
 | Covenant: Run Tests | Runs the declared test command so a commit can follow |
 | Covenant: Check Now | Re-checks immediately |
+| Covenant: Open Rule | Jumps to a rule in `covenant.yaml` (from the panel) |
+| Covenant: Show Violation | Opens the place a violation is about (from the panel) |
+| Covenant: Show Activity Log | Shows the extension's log of checks and commands |
 
 ## Settings
 

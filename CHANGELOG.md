@@ -1,6 +1,4 @@
-<p align="center"><img src="docs/logo.png" width="72" alt="Covenant logo"></p>
-
-<h1 align="center">Changelog</h1>
+<p align="center"><img src="docs/assets/headers/changelog.svg" width="100%" alt="Changelog: what changed in each release."></p>
 
 <p align="center">Install the latest with <code>pipx install covenant-agents</code> · <a href="https://github.com/visweshdev/Covenant/releases">All releases</a></p>
 
@@ -33,7 +31,10 @@
   - debug-code checks skip comments, doc examples, scripts and CLIs; a `skipif` on a brand-new
     test isn't a skipped test; compiled requirements (pip-compile, uv) are lockfiles;
   - secret scanning ignores values that are plain lowercase words.
-- Redesigned README, with the reference split into [docs/](docs/README.md) pages.
+- **Docs:** a redesigned README and ten docs pages with matching artwork, including new
+  [Getting started](docs/getting-started.md), [rules file reference](docs/covenant-yaml.md) (every
+  checker's settings) and [FAQ](docs/faq.md) pages; every command, flag, environment variable and
+  file is now documented.
 - Installers install from PyPI by default (`--github` / `-GitHub` for the main branch).
 
 ## 0.1.1 (2026-10-31)

@@ -42,7 +42,7 @@ covenant compile "Don't change public APIs, don't delete user data, run tests be
 covenant init        # installs git + Claude Code hooks and starts enforcing
 ```
 
-That's it. Works on **Windows, macOS and Linux** with Python 3.11+.
+That's it. Works on **Windows, macOS and Linux** with Python 3.11+. The [getting started guide](https://github.com/visweshdev/Covenant/blob/main/docs/getting-started.md) walks through what happens next.
 
 > 💡 **Tip:** start from a ready-made rule set with `covenant compile --pack hotfix "fix the login crash"`
 > (`covenant packs` lists them), or let `covenant suggest` propose rules from what went wrong in
@@ -146,12 +146,15 @@ rules (removed APIs, new dependencies, deleted tests) and 2 were false alarms.
 
 | | Page | What's in it |
 |---|---|---|
-| 📏 | [Rules](https://github.com/visweshdev/Covenant/blob/main/docs/rules.md) | Checkers, what the compiler understands, refused commands, rule packs, step rules |
-| 🤖 | [Agents](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md) | Claude Code, MCP clients, the hook server, the sandbox, VS Code |
-| ✅ | [CI](https://github.com/visweshdev/Covenant/blob/main/docs/ci.md) | The GitHub Action and `covenant ci` |
-| 🧰 | [Tools](https://github.com/visweshdev/Covenant/blob/main/docs/tools.md) | Dashboard, undo, explain, alerts, suggest, team policies |
-| ⌨️ | [Commands](https://github.com/visweshdev/Covenant/blob/main/docs/commands.md) | Every command, flag, exit code and environment variable |
-| 🛡️ | [Safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md) | What Covenant protects against, and what it doesn't |
+| 🚀 | [Getting started](https://github.com/visweshdev/Covenant/blob/main/docs/getting-started.md) | Install, first rules, what happens when one breaks, changing rules, removing Covenant |
+| 📏 | [Rules](https://github.com/visweshdev/Covenant/blob/main/docs/rules.md) | All 19 checkers, what the compiler understands, refused commands, rule packs, step rules |
+| 📄 | [The rules file](https://github.com/visweshdev/Covenant/blob/main/docs/covenant-yaml.md) | `covenant.yaml` field by field, with every checker's settings |
+| 🤖 | [Agents](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md) | Claude Code, Cursor, Codex, any agent, git hooks, the hook server, the sandbox, VS Code |
+| ✅ | [CI](https://github.com/visweshdev/Covenant/blob/main/docs/ci.md) | The GitHub Action, `covenant ci` on any CI, how a pull request is judged |
+| 🧰 | [Tools](https://github.com/visweshdev/Covenant/blob/main/docs/tools.md) | Dashboard and replay, undo, explain, alerts, suggest, team policies |
+| ⌨️ | [Commands](https://github.com/visweshdev/Covenant/blob/main/docs/commands.md) | Every command and flag, exit codes, environment variables, files |
+| 🛡️ | [Safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md) | What Covenant protects against, its limits, what isn't built yet |
+| ❓ | [FAQ](https://github.com/visweshdev/Covenant/blob/main/docs/faq.md) | Common questions and fixes for common problems |
 
 ## Contributing
 
