@@ -66,7 +66,7 @@ npm install
 npm test                 # unit tests (no VS Code needed)
 npm run test:e2e -- "<path to Code executable>" <repo>   # opens VS Code on a repo and checks what it shows
 npm run package          # builds covenant-<version>.vsix
-code --install-extension covenant-0.1.1.vsix
+code --install-extension covenant-0.1.2.vsix
 ```
 
 A built `.vsix` is also attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).

@@ -4,7 +4,7 @@
 
 ---
 
-## Unreleased
+## 0.1.2 (2026-11-02)
 
 - **Replayed on 50 real repositories** (`covenant bench replay`): the last 30 commits of 50
   popular Python, TypeScript, Go, Rust and Java projects (1,446 commits), judged by the CI check.
