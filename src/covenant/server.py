@@ -10,9 +10,8 @@ mount) so the server can check and restore files.
 
 Every request needs `Authorization: Bearer <token>`. The token is created at start and
 written to the state folder; it keeps other local processes from posting events, but an
-agent that can read the hook configuration can read it too, so it is not a defense against
-the agent itself. Isolation against the agent comes from running the agent where neither the
-token's file nor the state folder is visible.
+agent that can read the hook configuration can read it too. Keep state in a separate mount
+and treat the agent's hook events as claims from the agent environment.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ import hmac
 import json
 import os
 import secrets
+import subprocess
 import threading
 import time
 from http import HTTPStatus
@@ -50,11 +50,14 @@ def ensure_token(state_dir: Path) -> str:
 
 
 class HookServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], repo: Path, covenant: str | None, state_dir: str | None):
-        super().__init__(address, Handler)
+    def __init__(self, address: tuple[str, int], repo: Path, covenant: str | None, state_dir: str | None,
+                 start_task: bool = False):
         runtime = Runtime.open(repo, covenant_path=covenant, state_dir=state_dir)
         if runtime is None:
             raise ValueError(f"no covenant.yaml in {repo}")
+        if start_task and not runtime.has_session:
+            runtime.start()
+        super().__init__(address, Handler)
         self.repo, self.covenant, self.state_dir_arg = repo, covenant, state_dir
         self.state_dir = runtime.state_dir
         # The sandbox hands the server its token, so it can write the agent's settings beforehand.
@@ -201,7 +204,8 @@ def git_hook_script(name: str, url: str, token: str) -> str:
     return (
         "#!/bin/sh\n"
         "# Installed by covenant (server mode). Refuses the action if the Covenant server can't be reached.\n"
-        f'reply=$(curl -s -f -X POST -H "Authorization: Bearer {token}" -H "Content-Type: application/json" '
+        f'reply=$(curl -s -f --connect-timeout 5 --max-time 300 -X POST -H "Authorization: Bearer {token}" '
+        '-H "Content-Type: application/json" '
         f'-d "{{}}" "{url}/git/{name}") || {{ echo "covenant: server unreachable at {url}; refusing" >&2; exit 1; }}\n'
         'case "$reply" in *\'"allowed": true\'*) exit 0;; esac\n'
         'echo "covenant: refused:" >&2\n'
@@ -236,17 +240,35 @@ def _ours(group: dict[str, Any]) -> bool:
                and str(h.get("headers", {}).get("Authorization", "")).startswith("Bearer ") for h in group.get("hooks", []))
 
 
+def git_hook_install_dir(repo: Path) -> Path:
+    hooks = repo / ".git" / "hooks"
+    if not hooks.is_dir():
+        raise ValueError(f"{repo} has no standard Git hooks directory")
+    config = subprocess.run(["git", "-C", str(repo), "config", "--get", "core.hooksPath"], capture_output=True)
+    if config.returncode == 0:
+        raise ValueError("Git uses core.hooksPath; Covenant's Git integrity checks require the default hook directory")
+    if config.returncode != 1:
+        raise ValueError("could not read the Git hook configuration")
+    for name in ("pre-commit", "pre-push"):
+        path = hooks / name
+        if not path.is_symlink() and not path.exists():
+            continue
+        header = path.read_bytes().splitlines()[1:2] if path.is_file() and not path.is_symlink() else []
+        if not header or not header[0].startswith(b"# Installed by covenant"):
+            raise ValueError(f"existing Git hook at {path}; add `covenant hook {name}` to it instead")
+    return hooks
+
+
 def install(repo: Path, url: str, token: str, settings_file: Path) -> None:
     """Point Claude Code (HTTP hooks) and git (curl hooks) at the server, keeping other hooks."""
+    git_hooks = git_hook_install_dir(repo)
     data: dict[str, Any] = json.loads(settings_file.read_text(encoding="utf-8") or "{}") if settings_file.exists() else {}
     hooks = data.setdefault("hooks", {})
     for event, groups in http_hooks_settings(url, token)["hooks"].items():
         hooks[event] = [g for g in hooks.get(event, []) if not _ours(g)] + groups
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    git_hooks = repo / ".git" / "hooks"
-    if git_hooks.is_dir():
-        for name in ("pre-commit", "pre-push"):
-            path = git_hooks / name
-            path.write_text(git_hook_script(name, url, token), encoding="utf-8", newline="\n")
-            path.chmod(0o755)
+    for name in ("pre-commit", "pre-push"):
+        path = git_hooks / name
+        path.write_text(git_hook_script(name, url, token), encoding="utf-8", newline="\n")
+        path.chmod(0o755)

@@ -111,7 +111,12 @@ def _parser() -> argparse.ArgumentParser:
     brun.add_argument("--only", action="append", default=[], help="task id to run (repeatable)")
     brun.add_argument("--mode", choices=["prompt", "covenant", "covenant-unattended", "groundtruth"], action="append", required=True)
     brun.add_argument("--agent", choices=["scripted", "command"], default="scripted")
-    brun.add_argument("--agent-cmd", help='for --agent command, e.g. "claude -p {instruction} --permission-mode acceptEdits"')
+    command = brun.add_mutually_exclusive_group()
+    command.add_argument("--agent-cmd", help='shell command template, e.g. "claude -p {instruction}"')
+    command.add_argument("--agent-arg", action="append", help="one agent argument (repeat for executable and arguments)")
+    brun.add_argument("--agent-name", help="label for this command implementation and version in the report")
+    brun.add_argument("--agent-hooks", choices=["git", "claude-code"], default="git",
+                      help="for --agent command: Git hooks, optionally with Claude Code tool hooks")
     brun.add_argument("--llm", action="store_true", help="compile with Claude instead of the offline extractor")
     brun.add_argument("--out", default="bench-results.jsonl")
     brep = bench.add_parser("report", help="summarize result files")
@@ -128,7 +133,9 @@ def _parser() -> argparse.ArgumentParser:
     srv.add_argument("--port", type=int, default=8787)
     srv.add_argument("--bind", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
     srv.add_argument("--url", help="URL the hooks should call (default: http://127.0.0.1:<port>)")
-    srv.add_argument("--install", action="store_true", help="point Claude Code and git hooks at this server, then start it")
+    serve_setup = srv.add_mutually_exclusive_group()
+    serve_setup.add_argument("--install", action="store_true", help="point Claude Code and git hooks at this server, then start it")
+    serve_setup.add_argument("--start-task", action="store_true", help="approve rules and pin baselines before serving a new task")
     dmn = sub.add_parser("daemon", help="background hook server used by the fast hooks (started automatically)")
     dmn.add_argument("--idle", type=int, default=1800, help="exit after this many idle seconds (default: 1800)")
     dash = sub.add_parser("dashboard", help="serve a read-only dashboard of every repo on this machine")
@@ -177,18 +184,24 @@ def _only_setup_staged(repo: Path, covenant_path: Path) -> bool:
 
 
 def _install_git_hooks(repo: Path, covenant_path: Path, state_dir: str | None) -> int:
-    hooks = repo / ".git" / "hooks"
-    if not hooks.is_dir():
-        print(f"covenant: {repo} is not a git repository", file=sys.stderr)
+    import shlex
+
+    from .server import git_hook_install_dir
+
+    try:
+        hooks = git_hook_install_dir(repo)
+    except (OSError, ValueError) as exc:
+        print(f"covenant: {exc}", file=sys.stderr)
         return 3
     src = Path(__file__).resolve().parent.parent
-    state = f' --state-dir "{Path(state_dir).resolve().as_posix()}"' if state_dir else ""
+    state = f" --state-dir {shlex.quote(Path(state_dir).resolve().as_posix())}" if state_dir else ""
     for name in ("pre-commit", "pre-push"):
         script = (
             "#!/bin/sh\n"
             "# Installed by covenant. Blocks the action if the Covenant is violated.\n"
-            f'PYTHONPATH="{src.as_posix()}{os.pathsep}$PYTHONPATH" exec "{Path(sys.executable).as_posix()}" '
-            f'-m covenant --repo "{repo.as_posix()}" --covenant "{covenant_path.as_posix()}"{state} hook {name}\n'
+            f'PYTHONPATH={shlex.quote(src.as_posix())}"${{PYTHONPATH:+{os.pathsep}$PYTHONPATH}}" '
+            f'exec {shlex.quote(Path(sys.executable).as_posix())} -m covenant --repo {shlex.quote(repo.as_posix())} '
+            f'--covenant {shlex.quote(covenant_path.as_posix())}{state} hook {name}\n'
         )
         path = hooks / name
         path.write_text(script, encoding="utf-8", newline="\n")
@@ -275,13 +288,14 @@ def _bench(args: argparse.Namespace) -> int:
     if not tasks:
         print(f"covenant: no tasks in {args.tasks}", file=sys.stderr)
         return 3
-    if args.agent == "command" and not args.agent_cmd:
-        print("covenant: --agent command needs --agent-cmd", file=sys.stderr)
+    if args.agent == "command" and not (args.agent_cmd or args.agent_arg):
+        print("covenant: --agent command needs --agent-cmd or --agent-arg", file=sys.stderr)
         return 3
     results = []
     for mode in args.mode:
         for task in tasks:
-            r = runner.run_task(task, mode, args.agent, args.agent_cmd, args.llm)
+            r = runner.run_task(task, mode, args.agent, args.agent_cmd, args.llm,
+                                agent_name=args.agent_name, agent_hooks=args.agent_hooks, agent_args=args.agent_arg)
             flag = "ok" if r.success and not r.violations else ("VIOLATION" if r.violations else "failed")
             print(f"{mode:<11} {task.id:<28} {flag:<9} blocked={r.blocked} {', '.join(r.violations)}", file=sys.stderr)
             results.append(r)
@@ -294,13 +308,18 @@ def _serve(args: argparse.Namespace, repo: Path) -> int:
     from . import server
 
     try:
-        httpd = server.HookServer((args.bind, args.port), repo, args.covenant, args.state_dir)
+        httpd = server.HookServer((args.bind, args.port), repo, args.covenant, args.state_dir, start_task=args.start_task)
     except (OSError, ValueError) as exc:
         print(f"covenant: can't start the hook server: {exc}", file=sys.stderr)
         return 3
     url = args.url or f"http://127.0.0.1:{httpd.server_address[1]}"
     if args.install:
-        server.install(repo, url, httpd.token, repo / ".claude" / "settings.json")
+        try:
+            server.install(repo, url, httpd.token, repo / ".claude" / "settings.json")
+        except (OSError, ValueError) as exc:
+            httpd.server_close()
+            print(f"covenant: {exc}", file=sys.stderr)
+            return 3
         print(f"covenant: Claude Code and git hooks now call {url}; run `covenant start` to re-approve", file=sys.stderr)
     print(f"covenant: hook server for {repo} on {args.bind}:{httpd.server_address[1]} (hooks call {url})", file=sys.stderr)
     try:
@@ -348,11 +367,12 @@ def _sandbox(args: argparse.Namespace, repo: Path, covenant_path: Path) -> int:
 
     try:
         covenant = policy.load(covenant_path)[0]
+        plan = sandbox.prepare(repo, covenant, args.allow, Path(args.state_dir).resolve() if args.state_dir else None,
+                               covenant_path=covenant_path)
     except (OSError, ValidationError, ValueError) as exc:
-        print(f"covenant: cannot load {covenant_path}: {exc}", file=sys.stderr)
+        print(f"covenant: cannot prepare sandbox: {exc}", file=sys.stderr)
         return 3
-    plan = sandbox.prepare(repo, covenant, args.allow, Path(args.state_dir).resolve() if args.state_dir else None)
-    agent_cmd = [a for a in args.agent_cmd if a != "--"] if args.agent_cmd else []
+    agent_cmd = args.agent_cmd[1:] if args.agent_cmd[:1] == ["--"] else args.agent_cmd
     steps = sandbox.commands(plan["compose"], agent_cmd)
     print(f"Sandbox files in {plan['dir']}", file=sys.stderr)
     print(f"The agent may reach: {', '.join(plan['allow'])}", file=sys.stderr)

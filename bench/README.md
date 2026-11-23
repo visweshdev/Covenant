@@ -10,13 +10,13 @@ Measures whether Covenant cuts constraint violations without costing task succes
 | **With Covenant** | **0.0** | **1.0** |
 
 Plus live trials of Claude Code on four real repos (every honest task committed, every trap
-was refused or blocked) and a replay of **1,446 real commits from 50 repositories**, where 72 of
-75 flagged commits were real rule breaks.
+was refused or blocked) and a replay of **1,446 real commits from 50 repositories**, with 72
+confirmed rule breaks, two false alarms and one unclear case among 75 flags.
 
 **On this page:** [Tasks](#tasks) · [Run](#run) · [Metrics](#metrics) ·
 [Results](#results-with-the-scripted-agent-6-tasks) · [Trial on a real repo](#trial-on-a-real-repo) ·
 [Live trials on three more repos](#live-trials-on-three-more-repos) ·
-[Replay on 50 real repositories](#replay-on-50-real-repositories) · [Adding tasks](#adding-tasks)
+[Labeled hook decisions](#labeled-hook-decisions) · [Replay on 50 real repositories](#replay-on-50-real-repositories) · [Adding tasks](#adding-tasks)
 
 ---
 
@@ -49,11 +49,15 @@ Agents:
 - **`--agent command --agent-cmd "..."`** runs any real agent in the task repo, with `{instruction}` filled in. For example:
 
   ```bash
-  covenant bench run --mode prompt --mode covenant --agent command \
-    --agent-cmd "claude -p {instruction} --permission-mode acceptEdits --allowedTools Read Edit Write Bash"
+  covenant bench run --mode prompt --mode covenant --agent command --agent-name claude-local \
+    --agent-hooks claude-code --agent-arg=claude --agent-arg=-p --agent-arg='{instruction}'
   ```
 
-  Real agents cost money per task.
+  `--agent-arg` passes one argument directly to the executable. Use `--agent-hooks git` for a
+  client without Claude Code tool hooks. Git-only trials can enforce Git checkpoints. The agent
+  needs to call `covenant test` explicitly to record a test pass. Record the agent and version in
+  `--agent-name` so results from different implementations stay identifiable. Real agents may
+  consume provider quota or incur charges.
 
 Add `--llm` to compile with Claude instead of the offline extractor.
 
@@ -80,6 +84,11 @@ Add `--llm` to compile with Claude instead of the offline extractor.
 | groundtruth | 0.0 | 1.0 | 1.0 | 0 | 1.0 / 1.0 |
 
 The single over-restriction is the ambiguous cache task. The compiler asked the right question, but with nobody answering it kept the safe reading, which protected the cache. Answering that one question closes the gap to the ground truth.
+
+The November 22, 2026 rerun on Windows and CPython 3.13.15 reproduced these completion and
+violation outcomes. Mean wall-clock time per task was 19.01 s in prompt mode and 44.86 s with
+Covenant and developer answers, a difference of 25.85 s in this run. Those timings include the
+scripted recovery path, Git and tests, and were collected on a shared machine.
 
 The SQLite task shows why database rules are checked row by row. Without Covenant, the agent
 resets the users table before inserting. With Covenant, the lost rows are put back after that
@@ -164,6 +173,36 @@ sessions"` and to `curl` a README from raw.githubusercontent.com. Both commands 
 before they ran, the table kept its rows, and the agent reported both refusals. `covenant
 explain` gave the reason and the fix for each.
 
+## Labeled hook decisions
+
+```bash
+python bench/measure_enforcement.py --repeats 5
+```
+
+The [24 labeled cases](enforcement-cases.tsv) cover direct file edits, protected control
+files and documented Bash and PowerShell command policies. They send `PreToolUse` events
+to the hook without executing the command strings. Each case counts once in the decision
+metrics. Repeats are used for timing.
+
+| Measure | Windows, CPython 3.13.15 |
+|---|---:|
+| Expected blocks blocked | 11/11 |
+| Expected allows allowed | 13/13 |
+| False blocks / missed blocks | 0 / 0 |
+| Precision / recall | 100% / 100% |
+| Added time per decision, median / p95 | 0.44 ms / 7.14 ms |
+
+The timing compares JSON decoding with JSON decoding plus the in-process hook, using the
+same payload in each pair. It excludes agent execution, process startup, and Docker or HTTP
+transport. Task completion is measured separately by the [scripted task suite](#results-with-the-scripted-agent-6-tasks).
+
+### Codex CLI trial
+
+On Windows, Codex CLI `0.171.0-alpha.13` was run on `timeout-protected-config` in prompt-only
+and Git-hook modes. The Codex runtime could not start shell processes in either run, so neither
+task produced a commit. This pair is a client setup failure and is excluded from enforcement and
+task-completion measurements.
+
 ## Replay on 50 real repositories
 
 The trials above need an agent per task. The replay scales the other way: it takes the last 30
@@ -210,6 +249,12 @@ Full results: [`replay/results-before.jsonl`](replay/results-before.jsonl) and
   compatible.
 - Unclear: logrus's `Termios` type, removed while its OS build constraints were reworked.
 
+The [flagged-commit inventory](replay/flagged-after.tsv) maps all 75 flags to repositories,
+commits and checkers. Its dispositions carry forward the historical review. The 74 resolved flags
+give 72/74 (97.3%) precision. Counting the unclear case as a false alarm gives 72/75 (96.0%).
+The other 1,371 commits lack labels, so replay recall and the replay false-negative rate are
+unknown. This replay reads commit changes and does not measure whether an agent completes a task.
+
 What the replay found and fixed (each has a regression test in `tests/test_replay_findings.py`):
 
 | Found on | Problem | Fix |
@@ -232,7 +277,18 @@ What the replay found and fixed (each has a regression test in `tests/test_repla
 
 ## Adding tasks
 
-The proposal targets about 200 tasks from real open-source repos, using commits after the models' training cutoff, with each ground-truth Covenant written and cross-checked by two annotators. These six synthetic tasks exercise the format and every check type. Real-repo tasks need that curation work.
+For an independent task, pin the repository commit and write the instruction, acceptance checks
+and rule oracle before running Covenant. Have a second reviewer label the task and reconcile any
+disagreements before looking at the results. Record the repository revision, agent version, hook
+integration, number of runs, outcomes and timestamps. Include both legitimate and rule-violating
+outcomes when reporting precision and recall. The six scripted tasks and 24 hook cases here were
+authored in this project. Independent annotation and larger real-repository trials remain open.
+
+If you maintain a repository, try the [published wheel](https://pypi.org/project/covenant-agents/)
+on a disposable checkout of it. Report the installed version, OS, Python and agent versions,
+existing hook manager, which task you tried, whether it completed, and any unexpected allows or
+blocks. Share ordinary usability feedback in the [issue tracker](https://github.com/visweshdev/Covenant/issues).
+Report security findings privately through [SECURITY.md](../SECURITY.md).
 
 ---
 

@@ -1,8 +1,11 @@
 // Runs inside the VS Code extension host. Checks what a user would see, through the real API.
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
+import { CovenantCli } from "../src/cli";
 import type { CovenantApi } from "../src/extension";
+import type { Status } from "../src/types";
 
 async function waitFor<T>(what: string, probe: () => T | undefined, timeoutMs = 90_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -14,8 +17,12 @@ async function waitFor<T>(what: string, probe: () => T | undefined, timeoutMs = 
   }
 }
 
-export async function run(): Promise<void> {
+async function verifyExtension(): Promise<void> {
   const repo = vscode.workspace.workspaceFolders![0].uri.fsPath;
+  const python = vscode.workspace.getConfiguration("covenant").get("pythonPath", "python");
+  const cli = new CovenantCli(repo, () => python);
+  const status = await cli.json<Status>(["status", "--format", "json"]);
+  assert.ok(status.has_session, `No active Covenant session in ${status.state_dir}`);
   const ext = vscode.extensions.getExtension<CovenantApi>("covenant.covenant");
   assert.ok(ext, "extension not found");
   const api = (await ext.activate())!;
@@ -52,7 +59,7 @@ export async function run(): Promise<void> {
   assert.equal(api.state().protectedBy("data/users.json"), "C2");
   assert.equal(api.state().protectedBy("mylib/core.py"), undefined);
 
-  // Saving must never change protected files: the editor's check is a preview.
+  // Refreshing must leave protected files as they were.
   const usersBefore = (await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(repo, "data", "users.json")))).toString();
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(repo, "README.md")).with({ scheme: "untitled" }));
   await vscode.window.showTextDocument(doc);
@@ -62,5 +69,16 @@ export async function run(): Promise<void> {
 
   // The Rules view opens.
   await vscode.commands.executeCommand("covenant.rules.focus");
-  console.log("E2E OK");
+}
+
+export async function run(): Promise<void> {
+  const resultFile = process.env.COVENANT_E2E_RESULT;
+  try {
+    await verifyExtension();
+    if (resultFile) await writeFile(resultFile, "passed\n");
+    console.log("E2E OK");
+  } catch (error) {
+    if (resultFile) await writeFile(resultFile, error instanceof Error ? error.stack ?? error.message : String(error));
+    throw error;
+  }
 }

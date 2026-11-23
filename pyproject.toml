@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["pydantic>=2.6", "pyyaml>=6", "anthropic>=2.3"]
+dependencies = ["pydantic>=2.6", "pyyaml>=6"]
 
 [project.urls]
 Homepage = "https://github.com/visweshdev/Covenant"
@@ -32,6 +32,7 @@ Changelog = "https://github.com/visweshdev/Covenant/blob/main/CHANGELOG.md"
 Issues = "https://github.com/visweshdev/Covenant/issues"
 
 [project.optional-dependencies]
+anthropic = ["anthropic>=2.3"]
 dev = ["pytest>=8"]
 
 [project.scripts]

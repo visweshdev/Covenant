@@ -31,7 +31,8 @@ def test_prepare_writes_an_isolated_setup(mylib_repo, tmp_path):
     settings = (plan["dir"] / "claude-settings.json").read_text(encoding="utf-8")
     assert "http://hooks:8787/hook" in settings
     assert (plan["dir"] / "proxy" / "sandbox_proxy.py").is_file()
-    assert (plan["dir"] / "covenant-src" / "pyproject.toml").is_file()
+    assert (plan["dir"] / "covenant" / "__main__.py").is_file()
+    assert "pydantic" in (plan["dir"] / "requirements.txt").read_text(encoding="utf-8")
     assert "curl" in (plan["dir"] / "git-hooks" / "pre-commit").read_text(encoding="utf-8")
     # the host repo's own git hooks are left alone
     assert not (mylib_repo / ".git" / "hooks" / "pre-commit").exists() or "hooks:8787" not in \
@@ -40,7 +41,14 @@ def test_prepare_writes_an_isolated_setup(mylib_repo, tmp_path):
 
 def test_commands():
     up, run, down = sandbox.commands(sandbox.Path("c.yml"), ["claude", "-p", "hi"])
-    assert up[-3:] == ["--build", "hooks", "proxy"] and run[-3:] == ["claude", "-p", "hi"] and down[-1] == "down"
+    assert "--wait" in up and up[-3:] == ["--build", "hooks", "proxy"]
+    assert "--no-deps" in run and run[-3:] == ["claude", "-p", "hi"] and down[-1] == "down"
+
+
+def test_prepare_requires_state_outside_mounted_repo(mylib_repo):
+    rules = Covenant(instruction="x", goal=Goal(action="x"), clauses=[])
+    with pytest.raises(ValueError, match="outside the mounted repository"):
+        sandbox.prepare(mylib_repo, rules, [], mylib_repo / ".covenant")
 
 
 @pytest.fixture
@@ -95,3 +103,12 @@ def test_proxy_connect_tunnel(upstream, proxy):
 def test_allowed_matching():
     assert sandbox_proxy.allowed("api.anthropic.com", ["anthropic.com"])
     assert not sandbox_proxy.allowed("anthropic.com.evil.io", ["anthropic.com"])
+
+
+def test_proxy_reports_unavailable_origin(proxy):
+    with socket.socket() as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        port = reserved.getsockname()[1]
+        with socket.create_connection(("127.0.0.1", proxy), timeout=10) as client:
+            client.sendall(f"CONNECT localhost:{port} HTTP/1.1\r\n\r\n".encode())
+            assert client.recv(100).startswith(b"HTTP/1.1 502")

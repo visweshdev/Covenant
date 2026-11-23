@@ -58,7 +58,7 @@
 <td valign="top">
 <img src="assets/icons/safety.svg" width="40" align="left" hspace="10" alt="">
 <a href="safety.md"><b>Safety model</b></a><br>
-<sub>What Covenant guarantees, its limits, measured precision, and what isn't built yet.</sub>
+<sub>Enforcement boundaries, measured precision and sandbox verification. See the <a href="compatibility.md">versioned compatibility matrix</a> for specific integrations.</sub>
 </td>
 </tr>
 <tr>

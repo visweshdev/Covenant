@@ -2,13 +2,11 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
 from covenant import packs
 from covenant.compiler.extract import HeuristicExtractor
-from covenant.compiler.ground import ground
 from covenant.compiler.pipeline import compile_instruction
 from covenant.integrations.claude_code import ClaudeCodeHook
 from covenant.ir import Clause, ClauseKind, Covenant, Goal

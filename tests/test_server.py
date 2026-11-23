@@ -39,6 +39,14 @@ def test_token_required(hook_server):
     assert server.token_path(srv.state_dir).read_text() == srv.token
 
 
+def test_start_task_pins_baseline_before_listening(mylib_repo, tmp_path):
+    state = tmp_path / "sandbox-state"
+    with server.HookServer(("127.0.0.1", 0), mylib_repo, None, str(state), start_task=True) as srv:
+        session = json.loads((state / "session.json").read_text(encoding="utf-8"))
+        assert session["baselines"]["C1"] == git(mylib_repo, "rev-parse", "HEAD").stdout.strip()
+        assert srv.runtime().has_session
+
+
 def test_hook_events_over_http(hook_server, mylib_repo):
     srv, url = hook_server
     out = post(url + "/hook", {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}, srv.token)

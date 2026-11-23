@@ -79,9 +79,9 @@ def _tracked(repo: Path, path: str) -> bool:
 def ask_claude(system: str, user: str, schema: dict[str, Any], runner: Any = None) -> dict[str, Any]:
     """Structured answer from Claude: the API when a key is set, else the Claude Code login."""
     if os.environ.get("ANTHROPIC_API_KEY") and runner is None:
-        import anthropic
+        from ..compiler.extract import _anthropic
 
-        client = anthropic.Anthropic(**({"base_url": os.environ["COVENANT_ANTHROPIC_BASE_URL"]}
+        client = _anthropic().Anthropic(**({"base_url": os.environ["COVENANT_ANTHROPIC_BASE_URL"]}
                                         if os.environ.get("COVENANT_ANTHROPIC_BASE_URL") else {}))
         response = client.messages.create(
             model=os.environ.get("COVENANT_REVIEW_MODEL", "claude-sonnet-5-5"), max_tokens=4000, system=system,

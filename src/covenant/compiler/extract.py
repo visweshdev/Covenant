@@ -53,7 +53,8 @@ def _anthropic() -> Any:
     try:
         import anthropic
     except ImportError as exc:
-        raise CompileError("The Anthropic SDK isn't installed (pip install anthropic), or use --offline.") from exc
+        raise CompileError("Install the API extra with `pip install 'covenant-agents[anthropic]'`, "
+                           "or use --backend claude-code or --offline.") from exc
     return anthropic
 
 

@@ -1,6 +1,5 @@
 """Undo snapshots of the whole working tree."""
 
-from pathlib import Path
 
 import pytest
 

@@ -13,16 +13,15 @@ Clause params:
 
 from __future__ import annotations
 
-import io
 import json
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
 from ..feedback import ViolationReport
+from ..git_archive import extract_git_archive
 from ..ir import Clause
 from .api_surface import diff_surfaces
 
@@ -223,8 +222,7 @@ def materialize(repo_root: Path, ref: str) -> Path:
     if archive.returncode != 0:
         raise TsSurfaceError(archive.stderr.decode(errors="replace").strip())
     dest.mkdir(parents=True)
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-        tar.extractall(dest, filter="data")
+    extract_git_archive(archive.stdout, dest)
     (dest / ".complete").write_text("", encoding="utf-8")
     return dest
 

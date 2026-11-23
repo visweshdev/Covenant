@@ -85,7 +85,7 @@ See [bench/README.md](../bench/README.md) for both.
 
 | Variable | What it does |
 |---|---|
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | Compile and review with the Claude API. Without either, your Claude Code login is used |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | Use the Claude API for compilation. API-backed review uses `ANTHROPIC_API_KEY`. On the current branch, the `anthropic` extra supplies the SDK. |
 | `COVENANT_ANTHROPIC_BASE_URL` | Overrides `ANTHROPIC_BASE_URL` for Covenant only (`compile` warns when that points away from Anthropic) |
 | `COVENANT_REVIEW_MODEL` | The model for `llm_review` (default `claude-sonnet-5-5`) |
 | `COVENANT_HOME` | Where state is kept (default `~/.covenant`) |

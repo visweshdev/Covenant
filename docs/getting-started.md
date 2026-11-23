@@ -66,6 +66,9 @@ If something is ambiguous, it asks at most three questions about specific things
 > [!TIP]
 > Compiling with Claude uses `ANTHROPIC_API_KEY` when it's set, and your Claude Code login
 > otherwise, so a Claude subscription is enough.
+> On the current branch, install `covenant-agents[anthropic]` for API-backed compilation and
+> review. Offline rules and the Claude Code login use the base package. Published version
+> 0.1.2 includes the SDK in the base install.
 
 ## 3. Approve and start enforcing
 
@@ -75,8 +78,9 @@ Read the rules Covenant wrote to `covenant.yaml` ([what's in it](covenant-yaml.m
 covenant init
 ```
 
-This checks the file, installs the git hooks and the Claude Code hooks, and starts a task. From
-now on every agent action, commit and push is checked.
+This checks the file, installs Git and Claude Code hooks, and starts a task. Git checks commits and
+pushes through its installed hooks. Claude Code can also check actions covered by its tool hooks.
+See the [integration coverage](compatibility.md).
 
 ## 4. Let the agent work
 
@@ -141,7 +145,7 @@ There's no uninstall command; remove the pieces by hand:
 1. Delete `.git/hooks/pre-commit` and `.git/hooks/pre-push` (Covenant's, marked "Installed by covenant").
 2. Remove the Covenant entries from `.claude/settings.json` (or `settings.local.json`).
 3. Optionally delete `covenant.yaml` and the task's state in `~/.covenant/workspaces/`.
-4. `pipx uninstall covenant-agents`.
+4. Run `pipx uninstall covenant-agents` or `pip uninstall covenant-agents`, depending on how you installed it.
 
 ---
 

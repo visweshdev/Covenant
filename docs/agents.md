@@ -123,8 +123,11 @@ covenant record effect delete data/users.db         # --db when the target is a 
 check every commit and push, whoever makes it: any agent, or a human.
 
 > [!WARNING]
-> They replace any existing `.git/hooks/pre-commit` and `pre-push`. If you use another hook
-> manager (husky, pre-commit), call `covenant hook pre-commit` / `covenant hook pre-push` from it.
+> On the current branch, Covenant preserves existing Git hooks. Use `covenant init --no-git`
+> and call `covenant hook pre-commit` and `covenant hook pre-push` from your hooks in `.git/hooks`.
+> Covenant reports `core.hooksPath` redirection as an integrity issue, so this setup uses Git's
+> default hook directory. Published version 0.1.2 replaces existing default Git hooks, so use
+> `--no-git` there as well.
 
 ## Hook server
 
@@ -146,8 +149,8 @@ the hook settings.
 
 ## Sandbox
 
-`covenant sandbox` runs the agent in Docker, in three containers on a private network with no
-route to the internet:
+`covenant sandbox` runs three Docker services. The agent and hook service attach to an internal
+network. The proxy also attaches to an outside network for allowlisted HTTP and HTTPS requests.
 
 ```text
    ┌─────────────┐      hook events      ┌─────────────┐
@@ -155,7 +158,7 @@ route to the internet:
    │ your repo + │                       │             │   state in a volume the agent
    │ Claude Code │                       └─────────────┘   can't see
    └──────┬──────┘
-          │ all traffic
+          │ proxied HTTP(S)
           ▼
    ┌─────────────┐      only allowed      ┌─────────────────────────────┐
    │    proxy    │ ─────────────────────▶ │ api.anthropic.com,          │
@@ -164,8 +167,10 @@ route to the internet:
    └─────────────┘
 ```
 
-So an agent that dodges a command rule (say, by writing the command into a script) still can't
-reach a host that isn't allowed, or touch Covenant's state.
+The agent container mounts the working repository and read-only hook configuration. The hook
+service keeps runtime state in its own volume. Proxy requests can reach allowlisted hosts and
+their subdomains. The agent image comes with Claude Code, Git, Python and curl.
+Use a Covenant file inside the mounted repository and a state directory outside it.
 
 ```bash
 covenant sandbox                        # runs Claude Code
@@ -177,8 +182,8 @@ covenant sandbox --print                # writes the files and shows the docker 
 > [!WARNING]
 > The hook token is in the agent's settings, so a determined agent could post made-up hook
 > events. The server still checks commits, pushes and diffs itself, but a made-up "tests passed"
-> would count; run `covenant test` from outside when that matters. The sandbox hasn't been run
-> end to end in Docker yet (see [Safety model](safety.md#not-built-yet)).
+> would count. Run tests independently when their provenance matters. See the
+> [sandbox verification and limits](safety.md#docker-verification).
 
 ## VS Code
 

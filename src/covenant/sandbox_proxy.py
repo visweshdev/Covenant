@@ -47,6 +47,7 @@ def _pipe(a: socket.socket, b: socket.socket) -> None:
 
 def handle(client: socket.socket, allow: list[str]) -> None:
     try:
+        client.settimeout(30)
         head = b""
         while b"\r\n\r\n" not in head and len(head) < 65536:
             chunk = client.recv(4096)
@@ -66,19 +67,24 @@ def handle(client: socket.socket, allow: list[str]) -> None:
             client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
                            b"Covenant sandbox: this host isn't on the allowlist\n")
             return
-        upstream = socket.create_connection((host, port_n), timeout=30)
+        try:
+            upstream = socket.create_connection((host, port_n), timeout=10)
+        except OSError as exc:
+            _log(f"ERROR upstream {host}:{port_n}: {exc}")
+            client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            return
         _log(f"ALLOW {method} {host}:{port_n}")
-        if method.upper() == "CONNECT":
-            client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
-            rest = head.split(b"\r\n\r\n", 1)[1]
-        else:  # plain http: pass the request on with an origin-form path
-            url = urlparse(target)
-            path = (url.path or "/") + (f"?{url.query}" if url.query else "")
-            rest = head.replace(target.encode("latin-1"), path.encode("latin-1"), 1)
-        if rest:
-            upstream.sendall(rest)
-        _pipe(client, upstream)
-        upstream.close()
+        with upstream:
+            if method.upper() == "CONNECT":
+                client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                rest = head.split(b"\r\n\r\n", 1)[1]
+            else:  # plain http: pass the request on with an origin-form path
+                url = urlparse(target)
+                path = (url.path or "/") + (f"?{url.query}" if url.query else "")
+                rest = head.replace(target.encode("latin-1"), path.encode("latin-1"), 1)
+            if rest:
+                upstream.sendall(rest)
+            _pipe(client, upstream)
     except (OSError, ValueError) as exc:
         _log(f"ERROR {type(exc).__name__}: {exc}")
     finally:

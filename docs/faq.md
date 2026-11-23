@@ -82,7 +82,7 @@ rather not commit the Claude Code hook settings.
 | "Don't change public APIs" is `unenforceable` | No package was found. Set `package`/`root` (Python), `entries` (TypeScript) or `language` (Go, Rust, Java) on the rule |
 | TypeScript API check fails: typescript not found | Install the project's dependencies, or point `COVENANT_TYPESCRIPT` at any `typescript` package |
 | An `INTEGRITY` problem after editing `covenant.yaml` | Expected: run `covenant start` to approve the new rules |
-| My other git hooks stopped running | `covenant init` replaced them; call `covenant hook pre-commit` / `pre-push` from your hook manager instead |
+| I already use Git hooks | Use `covenant init --no-git`, then call `covenant hook pre-commit` and `covenant hook pre-push` from your hooks in Git's default directory. See [Git hooks](agents.md#git-hooks) for `core.hooksPath` behavior. |
 | `compile` warns about `ANTHROPIC_BASE_URL` | Another tool exported it; set `COVENANT_ANTHROPIC_BASE_URL=https://api.anthropic.com` |
 | Hooks feel slow | Make sure fast hooks are on (the default); `COVENANT_NO_DAEMON` should be unset |
 | The dashboard shows nothing | Covenant shows repos it has enforced on this machine; run `covenant init` in one first |

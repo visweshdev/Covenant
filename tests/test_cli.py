@@ -66,6 +66,18 @@ def test_committing_only_setup_files_needs_no_tests(mylib_repo, tmp_path):
     assert git(mylib_repo, "commit", "-qm", "work").returncode != 0  # ordinary commits still need tests
 
 
+def test_install_hooks_preserves_custom_hook_manager(mylib_repo, tmp_path):
+    assert git(mylib_repo, "config", "core.hooksPath", ".hooks").returncode == 0
+    hook = mylib_repo / ".hooks" / "pre-commit"
+    hook.parent.mkdir()
+    original = b"#!/bin/sh\nexit 0\n"
+    hook.write_bytes(original)
+    result = cli(mylib_repo, tmp_path / "state", "install-hooks")
+    assert result.returncode == 3 and "core.hooksPath" in result.stderr
+    assert hook.read_bytes() == original
+    assert not (mylib_repo / ".git" / "hooks" / "pre-commit").exists()
+
+
 def test_status_and_compile_json(mylib_repo, tmp_path):
     state = tmp_path / "state"
     assert cli(mylib_repo, state, "start").returncode == 0

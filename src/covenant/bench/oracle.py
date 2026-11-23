@@ -4,15 +4,14 @@ they look only at the final files and git history, with their own simple logic."
 from __future__ import annotations
 
 import hashlib
-import io
 import re
-import tarfile
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..git_archive import extract_git_archive
 from .task import Check
 
 
@@ -61,8 +60,7 @@ def evaluate(check: Check, repo: Path, original: Path, base_commit: str) -> Chec
         for commit in commits:
             with tempfile.TemporaryDirectory() as tmp:
                 archive = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit], capture_output=True)
-                with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-                    tar.extractall(tmp, filter="data")
+                extract_git_archive(archive.stdout, Path(tmp))
                 r = subprocess.run(check.cmd, shell=True, cwd=tmp, capture_output=True, text=True, timeout=600)
                 if r.returncode != 0:
                     return CheckResult(check, False, f"tests fail at {commit[:10]}")

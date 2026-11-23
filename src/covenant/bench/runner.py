@@ -184,14 +184,15 @@ def _prepare(task: Task, workdir: Path) -> tuple[Path, str]:
 
 
 def run_task(task: Task, mode: str, agent: str = "scripted", agent_cmd: str | None = None, llm: bool = False,
-             workdir: Path | None = None) -> TaskResult:
+             workdir: Path | None = None, *, agent_name: str | None = None, agent_hooks: str = "git",
+             agent_args: list[str] | None = None) -> TaskResult:
     workdir = workdir or Path(tempfile.mkdtemp(prefix="covenant-bench-"))
     repo, base = _prepare(task, workdir)
     original = workdir / f"{task.id}.original"
     shutil.copytree(repo, original, ignore=shutil.ignore_patterns(".git"))
     state = workdir / f"{task.id}.state"
     started = time.monotonic()
-    result = TaskResult(task=task.id, mode=mode, agent=agent, success=False, violations=[])
+    result = TaskResult(task=task.id, mode=mode, agent=agent_name or agent, success=False, violations=[])
 
     hook = None
     if mode in ("covenant", "covenant-unattended", "groundtruth"):
@@ -220,7 +221,9 @@ def run_task(task: Task, mode: str, agent: str = "scripted", agent_cmd: str | No
         _git(repo, "commit", "-qm", "covenant", "--no-verify")
         base = _git(repo, "rev-parse", "HEAD").stdout.strip()
         cli = [sys.executable, "-m", "covenant", "--repo", str(repo), "--state-dir", str(state)]
-        subprocess.run([*cli, "install-hooks"], capture_output=True)
+        subprocess.run([*cli, "install-hooks"], check=True)
+        if agent == "command" and agent_hooks == "claude-code":
+            subprocess.run([*cli, "install-claude"], check=True)
         runtime = Runtime.open(repo, state_dir=state)
         runtime.start()
         hook = ClaudeCodeHook(runtime)
@@ -236,8 +239,11 @@ def run_task(task: Task, mode: str, agent: str = "scripted", agent_cmd: str | No
         result.blocked = bot.blocked
         result.detail["log"] = bot.log
     else:
-        command = (agent_cmd or "").format(instruction=shlex.quote(task.instruction), repo=shlex.quote(str(repo)))
-        r = subprocess.run(command, shell=True, cwd=repo, capture_output=True, text=True, timeout=3600)
+        result.detail["agent_hooks"] = agent_hooks if mode != "prompt" else "none"
+        command = ([arg.format(instruction=task.instruction, repo=str(repo)) for arg in agent_args] if agent_args else
+                   (agent_cmd or "").format(instruction=shlex.quote(task.instruction), repo=shlex.quote(str(repo))))
+        r = subprocess.run(command, shell=not agent_args, cwd=repo, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=3600)
         result.detail["agent_exit"] = r.returncode
         result.detail["agent_tail"] = (r.stdout + r.stderr)[-2000:]
         if mode != "prompt":

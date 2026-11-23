@@ -6,7 +6,7 @@ Covenant is built for agents that mean well but take shortcuts: the force push t
 conflict, the deleted test that wouldn't pass, the `DROP TABLE` in a cleanup script. This page
 says what it guarantees, and what needs the sandbox.
 
-**On this page:** [What it does](#what-it-does) · [Limits](#limits) · [Not built yet](#not-built-yet)
+**On this page:** [What it does](#what-it-does) · [Limits](#limits) · [Docker verification](#docker-verification) · [Not built yet](#not-built-yet)
 
 ---
 
@@ -25,29 +25,41 @@ says what it guarantees, and what needs the sandbox.
 ## Limits
 
 > [!WARNING]
-> Outside the sandbox, Covenant runs as your user. An agent with a shell could still edit its
-> state folder directly. That's detected, but not prevented; [`covenant sandbox`](agents.md#sandbox)
-> prevents it.
+> Local hooks run as your user. They can detect changes to pinned controls at a later checkpoint,
+> but an agent with the same filesystem permissions can change local state or interfere with hook
+> execution. [`covenant sandbox`](agents.md#sandbox) gives the hook service its own state volume and
+> restricts the agent's network. Treat this as defense in depth for a cooperative coding agent.
 
 - **Side effects** are found by comparing hashes on every event, not from kernel events.
 - **Databases:** SQLite databases are compared row by row. For other databases, Covenant sees the
   SQL the agent runs (commands, `.sql` files, database tools) and migrations, but not queries the
   app makes on its own.
-- **Refused commands** guard against mistakes and shortcuts, not an agent determined to hide a
-  command in a script. The sandbox's allowlist proxy covers the network side of that.
+- **Refused commands** recognize documented patterns in tool events. Indirect execution is outside
+  the command guard's coverage. Outcome checks can detect changes to protected resources at a later
+  checkpoint. Proxy decisions cover requests routed through the proxy.
 - **API checks** read source, not compiled artifacts. Go, Rust and Java are read without a
   compiler: a careful approximation. TypeScript uses the TypeScript compiler, and very long types
   are compared by their declaration text.
-- **Git hooks** replace existing `pre-commit` and `pre-push` hooks
-  ([how to combine them](agents.md#git-hooks)).
-- **Measured precision:** on [1,446 real commits from 50 repositories](../bench/README.md#replay-on-50-real-repositories),
-  2 of 75 flagged commits were false alarms.
+- **Git hooks** enforce the checkpoints Git invokes. The current installer preserves existing hooks
+  and supports [manual integration](agents.md#git-hooks) in Git's default hook directory.
+- **Replay precision:** a historical review of [1,446 commits across 50 repositories](../bench/README.md#replay-on-50-real-repositories)
+  found 72 rule breaks, two false alarms and one unclear case among the 75 flags. The unflagged
+  commits were unreviewed, so replay recall is unknown.
+
+## Docker verification
+
+The Compose smoke test builds the generated agent and hook images, starts the proxy and hook
+service together, and runs the agent against a disposable Git repository. It checks the state mount
+boundary, read-only configuration, allowed and denied proxy requests, direct TCP isolation from the
+test origin, a blocked Git change, a legitimate commit and failure when the hook server stops.
+
+Run `COVENANT_TEST_DOCKER=1 python -m pytest -q tests/test_docker_sandbox.py` with Docker Compose v2 or newer
+and access to the image and package registries. See the [compatibility matrix](compatibility.md)
+for verification status. Container escape resistance, DNS isolation and the behavior of allowed
+remote services remain outside the smoke test's scope.
 
 ## Not built yet
 
-- **The sandbox hasn't run in Docker end to end.** Its compose file, images and allowlist proxy
-  are built and tested (the proxy for real, over sockets), but the development machine has no
-  Docker, so the three containers haven't been started together.
 - **Live database proxy:** row-level rollback of SQL as it runs against Postgres or MySQL,
   including queries the app makes on its own. Destructive SQL the agent runs is already refused,
   and SQLite is guarded row by row.

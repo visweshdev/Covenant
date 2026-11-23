@@ -1,0 +1,76 @@
+repository	commit	subject	checkers	historical_disposition	note
+psf/requests	e50e5945294f	Improve static typing of 3rd party imports  (#7496)	dependency_diff, no_suppressions	rule break	-
+pallets/jinja	a2438d20b066	update dev dependencies	dependency_diff	rule break	-
+pallets/click	f14b75063fb3	update dev dependencies	no_suppressions	rule break	-
+pallets/click	ddede2147c93	`Parameter` typing improvements (#2805)	api_surface_diff	rule break	-
+pallets/click	c5cced7b3096	fix: `_termui_impl.open_url()` — 'start' on Windows is a cmd built-in, not an executable (#3186)	no_suppressions	rule break	-
+pallets/click	c69643b60cf9	Add file-like pager: `click.get_pager_file()` (#1572)	no_suppressions	rule break	-
+pallets/click	831c8f0948af	Add NoSuchCommand exception with suggestions for misspelled commands (#3228)	api_surface_diff	rule break	-
+pallets/click	c3535905c77a	Fix broken fish completion and multiline help string	test_guard	rule break	-
+pallets/flask	11c45eeba3b5	update dev dependencies	no_suppressions	rule break	-
+pallets/flask	06ea505ce2b2	separate copy per call	test_guard	rule break	-
+pallets/flask	954f5684e484	update dev dependencies	no_suppressions	rule break	-
+pallets/flask	f2ef7a553e80	werkzeug 3.2 compat	no_suppressions	rule break	-
+pallets/werkzeug	015697636f6a	add error code to bare type ignore	no_suppressions	false alarm	Existing suppression gained an error code
+more-itertools/more-itertools	4bd0bd876273	Merge fix for issue 832 (distinct_permutations)	test_guard	rule break	-
+jd/tenacity	389aab8b2688	fix: restore support for falsy wait values and callable + strategy (#694)	no_suppressions	rule break	-
+jd/tenacity	26f719dc73d3	Respect enabled=False on the direct-call path (#645)	no_suppressions	rule break	-
+tqdm/tqdm	75bdb6c379bc	fix py3.7 compat	dependency_diff	rule break	-
+tqdm/tqdm	4b3395272d66	revert accidental change to `tqdm(ascii)` default	api_surface_diff	rule break	-
+tqdm/tqdm	748e107287c9	lint	test_guard	rule break	-
+python-attrs/attrs	65c80d7ddf4c	Add tox to lockfile (#1608)	dependency_diff	rule break	-
+python-attrs/attrs	c8bb9bfaa284	Set ``slots_default`` for better ty support (#1649)	no_suppressions	rule break	-
+marshmallow-code/marshmallow	fcb0f9abd638	Tighten the get_value typehint to match internal use	test_guard	rule break	-
+hynek/structlog	e3ae36ad918e	Add codspeed benchmarks (#834)	dependency_diff	rule break	-
+arrow-py/arrow	2aaafcd58111	use zoneinfo instead of pytz (#1179)	dependency_diff	rule break	-
+arrow-py/arrow	97695bfce697	Migrate Arrow to use ZoneInfo for timezones (#1217)	dependency_diff, no_suppressions	rule break	-
+arrow-py/arrow	05cd9b47d0db	fix humanize month limits (#1224)	test_guard	rule break	-
+pypa/packaging	332d716676eb	refactor(version): use explicit keywords in __replace__ (#1378)	no_suppressions	rule break	-
+pypa/packaging	4b243af94ff6	feat(requirements): add Requirement.__replace__ (#1377)	no_suppressions	rule break	-
+pypa/packaging	ffced26d0a30	feat(specifiers): add `__replace__` to Specifier and SpecifierSet (#1457)	no_suppressions	rule break	-
+dateutil/dateutil	5b3571afd3d7	Use zoneinfo for time zone search paths	test_guard	rule break	-
+dateutil/dateutil	58ad91b9244c	Use native datetime fold support	test_guard	rule break	-
+dateutil/dateutil	a83670eaae5c	Remove rounding for runtimes without sub-minute offsets	test_guard	rule break	-
+dateutil/dateutil	0c9f9209e7f8	Move package metadata and pytest settings to pyproject.toml	dependency_diff	rule break	-
+dateutil/dateutil	d9cad2f65b7b	Run the tests in parallel with pytest-xdist (#1649)	dependency_diff	rule break	-
+mahmoud/boltons	dfd632467c06	iterutils: drop test that pins GUIDerator error wording	test_guard	rule break	-
+mahmoud/boltons	1216b467c10b	Complete September PR sweep for 26.2.0 (#481)	test_guard	rule break	-
+Delgan/loguru	d47a43cc96df	Simplify tests and implementation of weekday file rotation	test_guard	rule break	-
+Delgan/loguru	fb0bfc7cc6d6	Drop Mypy tests entirely for Pypy implementation	test_guard	rule break	-
+tox-dev/filelock	87ccd0fb118d	👷 ci(release): move releases onto shared workflows (#867)	dependency_diff	rule break	-
+chalk/chalk	678e5505458d	Tweaks	dependency_diff	rule break	-
+chalk/chalk	8a94e0ebfc49	Require Node.js 22	dependency_diff	rule break	-
+sindresorhus/ky	6b6756935c2d	Validate the callbacks and the input	test_guard	rule break	-
+sindresorhus/ky	58233f132037	Explain both causes of a missing response and document the new validation	ts_api_surface_diff	rule break	-
+sindresorhus/ky	3ded2aad45a1	Tweaks	test_guard	rule break	-
+sindresorhus/ky	13c8da559c94	Stop surfacing progress callback errors	test_guard	rule break	-
+sindresorhus/ky	242c32728a4b	Let a `beforeRetry` hook change per-attempt options	ts_api_surface_diff	rule break	-
+immerjs/immer	031492d182be	fix: avoid excessive Draft recursion for readonly arrays in recursive types (#1311)	ts_api_surface_diff	rule break	-
+spf13/cobra	a97f9fd47b29	fix CompletionFunc implementation (#2234)	source_api_diff	rule break	-
+spf13/cobra	40b5bc1437a5	"Revert ""Make detection for test-binary more universal (#2173)"" (#2235)"	test_guard	rule break	-
+spf13/cobra	51d675196729	Bump pflag to 1.0.8 (#2303)	source_api_diff	rule break	-
+unjs/ofetch	413397a9c541	refactor: more strict types	ts_api_surface_diff	rule break	-
+unjs/ofetch	858d41620424	refactor!: remove dependency on node-fetch-native (#518)	ts_api_surface_diff	rule break	-
+unjs/ofetch	d0440f08d485	chore: simplify readme	dependency_diff	rule break	-
+lukeed/clsx	1c36d1085803	chore: tape -> uvu tests	dependency_diff	rule break	-
+lukeed/clsx	3712966f1d6f	chore: build CJS & UMD files manually;	dependency_diff	rule break	-
+lukeed/clsx	3ec8e9fa2f6e	"break: include ""exports"" map w/ ""types"" conditions (#57)"	ts_api_surface_diff	rule break	-
+lukeed/clsx	3d960ab0fd7c	fix(types): include `bigint` in `ClassValue` type (#96)	ts_api_surface_diff	rule break	-
+Rich-Harris/magic-string	c2d19f1afb25	chore: clearify public/private state	ts_api_surface_diff	rule break	-
+Rich-Harris/magic-string	877ae769134a	chore: enable strict type checking (#371)	ts_api_surface_diff	rule break	-
+Rich-Harris/magic-string	f1576fa87c61	chore: remove the unused DEBUG timing instrumentation (#372)	test_guard, ts_api_surface_diff	rule break	-
+Rich-Harris/magic-string	98b6f128d3d4	test: drop the duplicated out-of-bounds move test (#376)	test_guard	rule break	-
+Rich-Harris/magic-string	c14d30358a50	fix(bundle): stop addSource mutating the caller's source description (#375)	ts_api_surface_diff	rule break	-
+Rich-Harris/magic-string	d081246d1455	perf: cut allocations and quadratic lookups on the sourcemap and bundle paths (#379)	ts_api_surface_diff	rule break	-
+sirupsen/logrus	3f90cee1e41a	Rationalize os specific build constraints	source_api_diff	unclear	Termios changed alongside platform build constraints
+go-chi/chi	b1c9ab47626c	middleware: record response status when flushing (#1174)	test_guard	rule break	-
+gorilla/mux	0e6f2dafea10	Added route return to route.use method	source_api_diff	rule break	-
+gorilla/mux	f18421322a2c	Updated comments and some consistency fixes	source_api_diff	rule break	-
+gorilla/mux	525206d7c2b2	wrapper to getter	source_api_diff	rule break	-
+sindresorhus/execa	2633abb20eec	Fix `execaNode()` and the `node` option missing IPC in their types	ts_api_surface_diff	rule break	-
+sindresorhus/execa	f5772f341ae4	Fix `result` types for fd-specific and union options	ts_api_surface_diff	rule break	-
+sindresorhus/execa	355d917f1d46	Fix subprocess stream types for option unions	ts_api_surface_diff	rule break	-
+sindresorhus/execa	cb8aaf60b64d	Fix IPC types for option unions	ts_api_surface_diff	rule break	-
+rust-lang/log	469a4418699d	Require Source methods be implemented in test (#406)	source_api_diff	rule break	-
+rust-lang/log	9d4206770dd9	Prepare for.0.4.14 release (#447)	source_api_diff	rule break	-
+rust-lang/log	87674d3a8dab	Bind lifetimes of &str returned from Key by the lifetime of 'k rather than the lifetime of the Key struct	source_api_diff	false alarm	Returned reference lifetime was lengthened
