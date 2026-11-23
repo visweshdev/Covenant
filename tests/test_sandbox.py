@@ -105,10 +105,15 @@ def test_allowed_matching():
     assert not sandbox_proxy.allowed("anthropic.com.evil.io", ["anthropic.com"])
 
 
-def test_proxy_reports_unavailable_origin(proxy):
-    with socket.socket() as reserved:
-        reserved.bind(("127.0.0.1", 0))
-        port = reserved.getsockname()[1]
-        with socket.create_connection(("127.0.0.1", proxy), timeout=10) as client:
-            client.sendall(f"CONNECT localhost:{port} HTTP/1.1\r\n\r\n".encode())
-            assert client.recv(100).startswith(b"HTTP/1.1 502")
+def test_proxy_reports_unavailable_origin(monkeypatch):
+    def refuse_connection(address, *, timeout):
+        assert address == ("localhost", 443)
+        raise ConnectionRefusedError("test origin is unavailable")
+
+    monkeypatch.setattr(sandbox_proxy.socket, "create_connection", refuse_connection)
+    client, proxy = socket.socketpair()
+    with client, proxy:
+        client.settimeout(5)
+        client.sendall(b"CONNECT localhost:443 HTTP/1.1\r\n\r\n")
+        sandbox_proxy.handle(proxy, ["localhost"])
+        assert client.recv(100).startswith(b"HTTP/1.1 502")
