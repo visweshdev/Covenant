@@ -1,9 +1,10 @@
-<p align="center"><img src="assets/headers/ci.svg" width="100%" alt="CI: judge every pull request by the rules of its base commit."></p>
+<p align="center"><img src="assets/headers/ci.svg" width="100%" alt="CI checks pull requests against the rules at the merge base."></p>
 
 <p align="center"><sub><a href="../README.md">Covenant</a> › <a href="README.md">Docs</a> › CI</sub></p>
 
-Hooks catch problems while the agent works; CI is the backstop. It checks every pull request,
-whoever or whatever wrote it, against rules the pull request itself can't change.
+Configure CI to check the final repository diff from any contributor. Commit
+`covenant.yaml` and any repository policy files to the target branch first so CI has
+approved rules to evaluate.
 
 **On this page:** [GitHub Action](#github-action) · [Other CI systems](#other-ci-systems) ·
 [How a pull request is judged](#how-a-pull-request-is-judged)
@@ -17,33 +18,37 @@ whoever or whatever wrote it, against rules the pull request itself can't change
 on: pull_request
 permissions:
   contents: read
-  pull-requests: write          # for the comments
 jobs:
   covenant:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }  # the base commit must be there
-      - uses: visweshdev/Covenant@main
-        # with: { comment: "false", run-tests: "false", agent: payments }
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: visweshdev/Covenant@v0.1.2
+        with:
+          comment: "false"
 ```
 
 | Input | Default | What it does |
 |---|---|---|
 | `comment` | `true` | Comment on the PR (needs `pull-requests: write`) |
-| `run-tests` | `true` | Run the declared tests on the PR's final state |
+| `run-tests` | `true` | Run the test commands required by the base rules on the checked-out PR state |
 | `agent` | | The agent name for [path ownership](rules.md#refused-commands) rules |
 | `covenant` | `covenant.yaml` | Path to the rules file |
-| `base` | the PR's target | The commit to compare against |
+| `base` | PR target SHA | Ref used to find the merge base with the checkout |
 | `python-version` | `3.12` | Python used to run Covenant |
 
-What you get on the pull request:
+Install any project dependencies before the action when it will run your tests. TypeScript
+API checks require Node.js and a resolvable `typescript` package.
+[TypeScript setup](faq.md#troubleshooting)
 
-- a **comment on the exact line** that breaks a rule, posted once (re-runs don't repeat it);
-- **one summary comment**, kept up to date, with problems that have no changed line to point at
-  (a deleted protected file, say);
-- **annotations** on the Files tab and a job summary;
-- a failing check when a rule is broken.
+The action writes annotations and a job summary. It fails when the CI evaluator emits a
+report. To enable inline and summary PR comments, set `comment: "true"` and grant
+`pull-requests: write`. Fork PRs normally receive a read-only token. Keep workflows that
+execute PR test code on `pull_request` with limited permissions.
+[GitHub's fork workflow rules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories)
 
 ## Other CI systems
 
@@ -58,24 +63,26 @@ covenant ci --format github --comment      # GitHub without the action; needs GI
 
 | Flag | What it does |
 |---|---|
-| `--base REF` | The commit to compare against (default: the merge base with the PR target, or `origin/main`/`master`) |
+| `--base REF` | Ref whose merge base with `HEAD` is used. Covenant tries the PR target and common default branches if needed |
 | `--format github\|json\|text` | Output format; `github` writes annotations and a job summary |
 | `--no-tests` | Skip the test run |
 | `--comment` | Post the PR comments (GitHub Actions) |
 
-Exit codes: `0` clean, `1` violations, `2` needs a human, `3` bad setup.
+For `covenant ci`, exit codes are `0` for no reports, `1` for any report, including a
+policy change requiring human review, and `3` for a setup error.
 
 ## How a pull request is judged
 
-- The rules come from the **base** commit, so a PR can't weaken them. A PR that changes
-  `covenant.yaml` is flagged for human review.
+- When the rules file exists at the **merge base**, Covenant reads that version and flags
+  changes to it for human review. When it is absent, Covenant uses the checked-out copy and
+  prints a warning. Review the initial policy PR before relying on CI enforcement.
 - API, dependency and migration checkers compare against the base.
 - Protected files are checked against the diff.
 - Test commands run on the PR's final state (step order can't be seen in CI, so "tests before
   commit" becomes "tests pass").
-- Commands and budgets are judged while the agent works, so they aren't re-checked in CI.
-- [Team policy](tools.md#team-policies) rules come from the base commit too, and a PR that
-  changes them is flagged.
+- Command, budget and other local step events are evaluated through agent integrations.
+- Repository [team policy](tools.md#team-policies) files come from the merge base too, and
+  changing them is flagged. Machine and HTTPS policy sources resolve outside Git history.
 
 ---
 

@@ -2,12 +2,13 @@
 
 <p align="center"><sub><a href="../README.md">Covenant</a> › <a href="../docs/README.md">Docs</a> › CovenantBench</sub></p>
 
-Measures whether Covenant cuts constraint violations without costing task success.
+The six scripted tasks compare the same task instructions with and without Covenant. The
+results below use simulated developer answers for ambiguous rules in Covenant mode.
 
 | | Violations per task | Task success |
 |---|---|---|
-| Instruction alone | 1.17 | 1.0 |
-| **With Covenant** | **0.0** | **1.0** |
+| Instruction alone | 1.17 | 6/6 |
+| **Covenant with developer answers** | **0.0** | **6/6** |
 
 Plus live trials of Claude Code on four real repos (every honest task committed, every trap
 was refused or blocked) and a replay of **1,446 real commits from 50 repositories**, with 72
@@ -32,10 +33,17 @@ Each task in `tasks/<id>/` is a small repo plus a `task.yaml` with:
 
 ## Run
 
+From the repository root, install the checkout and run the fixture suite.
+
 ```bash
+python -m pip install -e ".[dev]"
 covenant bench run --mode prompt --mode covenant-unattended --mode covenant --mode groundtruth
 covenant bench report bench-results.jsonl
 ```
+
+Each task runs in a temporary Git repository. Set `--out FILE` for a different JSONL
+destination, `--tasks DIR` for another task directory, or repeat `--only TASK_ID` to select
+specific tasks.
 
 | Mode | What it measures |
 |---|---|
@@ -57,7 +65,9 @@ Agents:
   client without Claude Code tool hooks. Git-only trials can enforce Git checkpoints. The agent
   needs to call `covenant test` explicitly to record a test pass. Record the agent and version in
   `--agent-name` so results from different implementations stay identifiable. Real agents may
-  consume provider quota or incur charges.
+  consume provider quota or incur charges. The command runner executes in a temporary
+  working directory under your user account. `--agent-arg`, `--agent-name` and
+  `--agent-hooks` require the current source.
 
 Add `--llm` to compile with Claude instead of the offline extractor.
 
@@ -72,7 +82,7 @@ Add `--llm` to compile with Claude instead of the offline extractor.
 | `feedback_recovery` | Share of blocked tasks that still ended in success |
 | `fidelity_precision` / `fidelity_recall` | Compiled clauses against the ground truth (same checker, listed params match) |
 | `asked_the_right_question` | Ambiguous tasks where a clarification question matched the expected one |
-| `seconds_per_task` | Added wall-clock time |
+| `seconds_per_task` | Mean elapsed wall-clock time per task for that mode and agent |
 
 ## Results with the scripted agent (6 tasks)
 
@@ -184,6 +194,9 @@ files and documented Bash and PowerShell command policies. They send `PreToolUse
 to the hook without executing the command strings. Each case counts once in the decision
 metrics. Repeats are used for timing.
 
+CI runs the same harness with `--check`, which returns a failure when a decision differs
+from its expected label.
+
 | Measure | Windows, CPython 3.13.15 |
 |---|---:|
 | Expected blocks blocked | 11/11 |
@@ -205,10 +218,9 @@ task-completion measurements.
 
 ## Replay on 50 real repositories
 
-The trials above need an agent per task. The replay scales the other way: it takes the last 30
-commits of **50 popular repositories** (25 Python, 10 TypeScript/JavaScript, 8 Go, 5 Rust,
-2 Java; list in [`replay/repos.txt`](replay/repos.txt)) and judges each real commit with the CI
-check, against rules compiled at the commit before them:
+The historical replay sampled up to 30 commits per repository across **50 repositories**
+(25 Python, 10 TypeScript/JavaScript, 8 Go, 5 Rust, 2 Java). It checked each commit against
+rules compiled from its parent. [Repository list](replay/repos.txt)
 
 > Don't change public APIs, don't commit secrets or API keys, don't delete or skip tests, don't
 > add new dependencies, no leftover debug prints, don't silence type errors, don't commit files
@@ -233,8 +245,9 @@ covenant bench replay --report replay-results.jsonl
 | TypeScript repos with an API check | 4 of 10 | **10 of 10** |
 | Seconds per commit (median / p95) | 3.7 / 12.8 | **2.2 / 7.1** |
 
-Full results: [`replay/results-before.jsonl`](replay/results-before.jsonl) and
-[`replay/results-after.jsonl`](replay/results-after.jsonl).
+The checked-in JSONL files record the sampled commit IDs. A fresh clone can select newer
+commits, so use these artifacts for the table above.
+[`results-before.jsonl`](replay/results-before.jsonl) · [`results-after.jsonl`](replay/results-after.jsonl)
 
 **The 75 flagged commits, reviewed one by one:** 72 are real breaks of the rules as written,
 2 are false alarms, and 1 is unclear.

@@ -6,13 +6,23 @@
 
 ## Requirements
 
-The `covenant` command:
+Use VS Code 1.100 or later and install Covenant into a Python 3.11+ environment that VS Code
+can access.
 
 ```bash
-pipx install covenant-agents
+python -m pip install covenant-agents
+python -m covenant --version
 ```
 
-Or `pip install covenant-agents`, or `pip install -e .` in a Covenant checkout.
+Set `covenant.pythonPath` to that interpreter if it differs from the editor's default
+`python`. If you use pipx, point the setting at the Python executable inside Covenant's
+pipx environment.
+
+Open the Git repository as a workspace folder and select **Covenant** in the Activity Bar.
+Open an existing `covenant.yaml` or use **Covenant: Compile Rules from Instruction** to draft
+one. The **Set Up This Repo** command installs hooks and starts a task. To preserve existing
+Git hooks, follow the manual setup in the terminal first.
+[Git hook setup](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md#git-hooks)
 
 ## Features
 
@@ -33,16 +43,15 @@ Problems are placed at:
 - the dependency in `package.json` or `pyproject.toml`;
 - or the rule in `covenant.yaml`.
 
-> **Saving never changes anything.** The editor's check runs `covenant check --preview`, which
-> doesn't roll back files and doesn't count toward escalating the agent. Your own edits to
-> protected data stay put until the agent's next checked step.
+> The editor uses `covenant check --preview` on refresh. That check leaves protected files
+> in place and leaves the agent's block count unchanged.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | Covenant: Compile Rules from Instruction | Drafts `covenant.yaml` from a plain-English instruction, asks up to three questions, and shows the draft before writing it |
-| Covenant: Set Up This Repo | `covenant init`: git hooks, Claude Code hooks, start enforcing |
+| Covenant: Set Up This Repo (Hooks + Start) | Runs `covenant init` to install Git and Claude Code hooks and start a task |
 | Covenant: Add a Rule to the Current Task | `covenant amend`: compiles an extra instruction, shows the new rules, and approves them without resetting the task |
 | Covenant: Approve Rules and Start Task | Pins the current `covenant.yaml` and baseline commit and starts a fresh task |
 | Covenant: Run Tests | Runs the declared test command so a commit can follow |
@@ -61,12 +70,19 @@ Problems are placed at:
 
 ## Build
 
+From the `vscode-extension` folder with Node.js 22, use the same commands as CI.
+
 ```bash
-npm install
-npm test                 # unit tests (no VS Code needed)
-npm run test:e2e -- "<path to Code executable>" <repo>   # opens VS Code on a repo and checks what it shows
-npm run package          # builds covenant-<version>.vsix
+npm ci
+npm test
+npm run package
 code --install-extension covenant-0.1.2.vsix
 ```
+
+With Covenant installed into the Python on your PATH, run `npm run test:e2e` to download
+VS Code 1.100.3 and open a disposable repository in an isolated profile. On headless Linux,
+use `xvfb-run -a npm run test:e2e`. Pass an installed executable with
+`npm run test:e2e -- "/path/to/Code"` to use the same fixture with a different host.
+The suite checks activation, commands, diagnostics, protected-file status and preview behavior.
 
 A built `.vsix` is also attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).

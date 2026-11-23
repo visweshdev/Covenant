@@ -2,8 +2,8 @@
 
 <p align="center"><sub><a href="../README.md">Covenant</a> › <a href="README.md">Docs</a> › Tools</sub></p>
 
-Everything around the rules: seeing what happened, undoing it, hearing about it, and sharing
-rules with a team.
+Inspect rules and task activity, recover files from restore points, and share policies
+across repositories.
 
 **On this page:** [Dashboard](#dashboard) · [Undo](#undo) · [Explain](#explain) ·
 [Alerts](#alerts) · [Suggest](#suggest) · [Team policies](#team-policies)
@@ -17,7 +17,8 @@ covenant dashboard                 # opens http://127.0.0.1:8765
 covenant dashboard --read-only     # no editing from the page
 ```
 
-One page for every repo Covenant enforces on this machine:
+The dashboard lists repositories with state under the default workspaces directory.
+`COVENANT_HOME` changes that directory. Start or initialize a task to populate the list.
 
 | Panel | Shows |
 |---|---|
@@ -25,7 +26,7 @@ One page for every repo Covenant enforces on this machine:
 | **Timeline** | Blocks and reports over time |
 | **Activity** | Recent events and protected paths |
 | **Editor** | Write a rule in plain English and Claude drafts it; check it, then save and approve. Added rules apply from now on, like `covenant amend`; changing or removing one restarts the task, after asking |
-| **Replay** | Step through any task, this one or one of the last 30: everything the agent did and every decision Covenant made, with why each rule fired and how to fix it |
+| **Replay** | Step through recorded events and reports for the current task or up to 30 archived tasks |
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -46,15 +47,16 @@ address bar. Requests from other web pages are refused.
 
 Before a risky step (`rm`, `mv`, `git reset`/`checkout`/`clean`, `sed -i`, redirects,
 formatters, rewriting a whole file), Covenant records the working tree, untracked files
-included, as a git commit under `refs/covenant/snapshots/`.
+included when Git would add them, as a commit under `refs/covenant/snapshots/`.
 
 ```bash
 covenant snapshots        # list restore points
-covenant snapshot         # take one now
+covenant snapshot "before config change"
 covenant undo             # restore the latest (or: covenant undo 7; --yes skips the question)
 ```
 
-- Your branch, index and stash aren't touched, and the refs are never pushed.
+- Your branch, index and stash stay intact. The snapshot refs stay local during ordinary
+  branch pushes.
 - An undo first snapshots the current state, so it can be undone too.
 - The last 50 are kept. `COVENANT_SNAPSHOTS=0` turns them off.
 
@@ -120,27 +122,46 @@ the commits that suggested it.
 
 ## Team policies
 
-A repo's `covenant.yaml` can list shared policy files:
+A repo's `covenant.yaml` can list shared policy files. Put `extends` inside the
+`covenant:` wrapper when you use one.
 
 ```yaml
-extends:
-  - policies/team.yaml
-  - "https://example.com/team.yaml#sha256=<hash>"
+covenant:
+  instruction: Protect public APIs during maintenance.
+  goal: {action: maintenance}
+  extends:
+    - policies/team.yaml
+  clauses: []
 ```
 
-- Policy files hold rules in the same format and can extend each other.
+An example `policies/team.yaml` in a repository with a Python package at `src/mypkg`
+can define a rule like this.
+
+```yaml
+policy:
+  name: platform-team
+  clauses:
+    - id: PLATFORM_API
+      kind: SemanticInvariant
+      source_span: Preserve the public Python API
+      checker: api_surface_diff
+      params: {package: mypkg, root: src, baseline: HEAD}
+```
+
+- Policies use the same clause fields as Covenant files. Relative `extends` paths start
+  at the file that declares them.
 - `COVENANT_POLICY` (paths separated by your OS's path separator) applies policies to every repo
   on a machine.
-- A policy at an **https address** is cached in `~/.covenant/policies/`, and the last good copy
-  is used when the network is down. The `#sha256=` pin is optional; with it, a policy that
-  changes without the pin being updated is an error.
+- An HTTPS policy is cached under `~/.covenant/policies/`. Append `#sha256=<digest>` to pin
+  its contents. Covenant can use a cached copy when the network is down if it matches the pin.
 
 Policy rules:
 
 - are merged in first, with an `origin` naming their policy;
 - can't be redefined by a repo: an id clash is an error;
 - are protected from the agent like Covenant's own files;
-- in CI, come from the base commit, and a PR that changes them is flagged.
+- in CI, come from the merge base for policies tracked in the repository. HTTPS policies
+  resolve by URL and any configured digest. [CI policy handling](ci.md#how-a-pull-request-is-judged)
 
 ---
 

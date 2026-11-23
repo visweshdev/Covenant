@@ -11,7 +11,8 @@
 
 ## 1. Install
 
-You need **Python 3.11 or newer** and **git**. Covenant works on Windows, macOS and Linux.
+You need **Python 3.11 or newer**, Git, and a repository with at least one commit.
+Covenant works on Windows, macOS and Linux.
 
 ```bash
 pipx install covenant-agents        # or: pip install covenant-agents
@@ -23,11 +24,11 @@ covenant --version
 
 | | |
 |---|---|
-| From a checkout, with pipx set up for you | `sh install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1` |
-| The newest code on GitHub | `sh install.sh --github` or `install.ps1 -GitHub` |
+| Install the PyPI release using a script from this checkout | `sh install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1` |
+| Install the GitHub main branch using the same scripts | `sh install.sh --github` or `.\install.ps1 -GitHub` |
 | For development | `pip install -e ".[dev]"` (see [CONTRIBUTING.md](../CONTRIBUTING.md)) |
 
-On Windows, install into a short path: one of Covenant's dependencies has very long file names.
+On Windows, a short install path can help if a dependency fails with a path-length error.
 </details>
 
 ## 2. Write your rules
@@ -36,7 +37,7 @@ In the repository the agent will work in, describe the task and its limits in pl
 
 ```bash
 cd your-repo
-covenant compile "Don't change public APIs, don't delete user data, run tests before committing."
+covenant compile --offline "Don't change public APIs, don't delete user data, run tests before committing."
 ```
 
 Covenant splits the instruction into rules, ties each one to something real in the repo (the
@@ -58,17 +59,16 @@ If something is ambiguous, it asks at most three questions about specific things
 
 | Want | Use |
 |---|---|
-| No Claude, fully offline | `covenant compile --offline "..."` |
-| A ready-made rule set | `covenant compile --pack safe-refactor "..."` (`covenant packs` lists them) |
+| Claude-assisted compilation | Omit `--offline` and configure a Claude backend |
+| A ready-made rule set | `covenant compile --offline --pack safe-refactor "..."` (`covenant packs` lists them) |
 | Ideas from the repo's own history | `covenant suggest` |
-| No questions, safe defaults | `--unattended` |
+| Noninteractive setup | `--unattended --yes` to use conservative defaults and approve writing the file |
 
 > [!TIP]
-> Compiling with Claude uses `ANTHROPIC_API_KEY` when it's set, and your Claude Code login
-> otherwise, so a Claude subscription is enough.
-> On the current branch, install `covenant-agents[anthropic]` for API-backed compilation and
-> review. Offline rules and the Claude Code login use the base package. Published version
-> 0.1.2 includes the SDK in the base install.
+> Claude compilation picks the API when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set.
+> You can also select `--backend claude-code` to use a logged-in Claude Code CLI.
+> For the current source, install the `anthropic` extra to use the API. PyPI 0.1.2 bundles
+> the SDK. [Compatibility](compatibility.md)
 
 ## 3. Approve and start enforcing
 
@@ -78,26 +78,35 @@ Read the rules Covenant wrote to `covenant.yaml` ([what's in it](covenant-yaml.m
 covenant init
 ```
 
-This checks the file, installs Git and Claude Code hooks, and starts a task. Git checks commits and
-pushes through its installed hooks. Claude Code can also check actions covered by its tool hooks.
-See the [integration coverage](compatibility.md).
+This validates the file, installs Git and Claude Code hooks, and pins the approved rules for
+the task. Use `--local` to put Claude Code settings in `.claude/settings.local.json`, or
+`--no-claude` for Git-only setup.
+
+If the repository already has Git hooks, add Covenant to those hooks and run
+`covenant init --no-git`. The PyPI 0.1.2 installer replaces existing default hooks, so use
+`--no-git` to preserve them. [Manual Git hook setup](agents.md#git-hooks)
 
 ## 4. Let the agent work
 
-Start Claude Code (or any agent) as usual. At the start of its session it's told the rules.
-While it works:
+With Claude Code hooks installed, start a new Claude Code session to receive the rules.
+The hooks check supported actions and record events as the session runs.
 
 - risky commands are **refused before they run** (`git push --force`, `DROP TABLE`, `curl` to a
   host that isn't allowed);
-- edits to protected files are **refused**, and side effects from scripts are **rolled back**;
+- covered edits to protected files are **refused**, and supported side effects can be
+  **rolled back** under a rollback rule;
 - a commit or push that would break a rule is **blocked**, with the reason and a fix;
-- a **restore point** is taken before risky steps.
+- recognized risky steps can trigger a **restore point**.
+
+With a Git-only integration, run `covenant test` to record a passing test run and report edits
+with `covenant record edit PATH` when using ordering rules.
+[Other agent integrations](agents.md#any-other-agent)
 
 Check where things stand at any time:
 
 ```bash
 covenant status      # the rules and what the agent has done
-covenant check       # run every check now
+covenant check --preview  # inspect current violations without rollbacks
 covenant dashboard   # the same in a browser, with a rule editor and replay
 ```
 
@@ -140,12 +149,15 @@ When the work is done, write new rules for the next task (`covenant compile ...`
 
 ## Removing Covenant
 
-There's no uninstall command; remove the pieces by hand:
+Remove the integration from the repository before uninstalling the package.
 
-1. Delete `.git/hooks/pre-commit` and `.git/hooks/pre-push` (Covenant's, marked "Installed by covenant").
-2. Remove the Covenant entries from `.claude/settings.json` (or `settings.local.json`).
-3. Optionally delete `covenant.yaml` and the task's state in `~/.covenant/workspaces/`.
-4. Run `pipx uninstall covenant-agents` or `pip uninstall covenant-agents`, depending on how you installed it.
+1. Remove Git hooks marked `Installed by covenant`. For manually integrated hooks, remove
+   the calls to `covenant hook` from your existing scripts.
+2. Remove the Covenant hook entries from `.claude/settings.json` or `.claude/settings.local.json`.
+3. If you also want to remove task history, find that repository's state directory with
+   `covenant status`. Keep `covenant.yaml` if your CI workflow still uses it.
+4. Run `pipx uninstall covenant-agents` or `python -m pip uninstall covenant-agents`, matching
+   your install method.
 
 ---
 

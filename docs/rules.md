@@ -21,9 +21,11 @@
 | 4 | **Ask** | At most three questions, each about a specific thing in the repo |
 | 5 | **Validate** | The result is checked statically; then you approve it |
 
-Claude is reached through `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`) when set, and
-otherwise through your Claude Code login (`claude -p`), so a Claude subscription is enough.
-`--backend api|claude-code` picks one, and `--model` picks the model (default `claude-opus-5-5`).
+The default backend chooses the API when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is
+set, or the installed Claude Code CLI otherwise. Choose explicitly with `--backend api`
+or `--backend claude-code`. On current source installs, the API requires the `anthropic`
+extra. Use `--model` to override the extraction model, which defaults to
+`claude-opus-5-5`. [Compatibility](compatibility.md)
 
 To add a rule mid-task, run `covenant amend "also don't touch config/"`. The new rules apply
 from then on and the task's history is kept.
@@ -45,8 +47,8 @@ Each checker's settings are listed in [the rules file reference](covenant-yaml.m
 | `source_api_diff` | Invariant | Go, Rust and Java public API, read from source (no compiler needed) |
 | `schema_guard` | Invariant | No dropped tables or columns, truncation, unqualified deletes or type changes in new migrations |
 | `dependency_diff` | Invariant | Only allowed packages change; locked versions keep their major version |
-| `sqlite_guard` | Invariant | Rows, tables and columns in SQLite databases are never lost (inserts are fine); checked after every step, and lost rows are put back |
-| `effect_monitor` | Prohibition | Protected files and tables aren't deleted, truncated or overwritten, whatever does it; rolled back from a snapshot |
+| `sqlite_guard` | Invariant | Checks for dropped tables or columns and removed rows in configured SQLite files. A rollback rule can restore protected data from a snapshot |
+| `effect_monitor` | Prohibition | Checks for forbidden operations on protected paths and reported database effects. Rollback rules can restore supported file changes |
 | `trace_monitor` | Obligation | Ordering, limit and deadline rules over the agent's steps ([below](#rules-over-the-agents-steps)) |
 | `scope_guard` | Invariant | Only the files you name change; optionally no new or deleted files |
 | `secret_scan` | Invariant | No API keys, tokens, private keys, passwords or `.env` files in the change (reports are masked) |
@@ -63,7 +65,7 @@ Each checker's settings are listed in [the rules file reference](covenant-yaml.m
 <details>
 <summary><b>How the API checkers decide what's a breaking change</b></summary>
 
-A change every existing caller survives isn't reported:
+The source checkers recognize several common compatible changes.
 
 - **Python:** a new optional parameter; a parameter type that widens (`A` → `A | None`) or a
   return type that narrows; a new base class; `ClassVar[...]`, `@override` or `@final`; an
@@ -73,8 +75,8 @@ A change every existing caller survives isn't reported:
 - **TypeScript:** a required parameter that became optional, new optional parameters;
   `_private` and `#private` members aren't API.
 
-Removing a name, renaming or reordering parameters, changing a default, adding a required
-parameter, or narrowing an accepted type is reported. These rules were tuned on
+The checkers look for changes such as removed names, reordered parameters, new required
+parameters and narrower accepted types. They were refined using the historical replay of
 [1,446 real commits from 50 repositories](../bench/README.md#replay-on-50-real-repositories).
 </details>
 
@@ -105,7 +107,8 @@ parameter, or narrowing an accepted type is reported. These rules were tuned on
 
 ## Refused commands
 
-`command_guard` refuses commands before they run, in Bash and PowerShell alike.
+`command_guard` matches covered patterns in command and tool events. Claude Code hooks
+can refuse matching Bash and PowerShell commands before execution.
 
 | Category | Refuses | Category | Refuses |
 |---|---|---|---|
@@ -132,10 +135,10 @@ without a `WHERE` are refused; a `DELETE ... WHERE` is fine.
 <details>
 <summary><b>Network allowlist</b></summary>
 
-With `allow_hosts`, only those hosts (and their subdomains) can be reached: by commands, by
-`git push`/`pull` (the remote's host), by package installs (their registry, so `pip install`
-needs `pypi.org`) and by the WebFetch tool. A network command whose destination can't be
-worked out is refused.
+With `allow_hosts`, the guard compares destinations it recognizes in commands, Git remotes,
+package installs and WebFetch requests against the listed hosts and their subdomains.
+Recognized network commands with an unknown destination are refused.
+[Network enforcement boundaries](safety.md#limits)
 </details>
 
 <details>
@@ -157,13 +160,14 @@ much work was done. Subagent sessions keep their own logs and aren't counted.
 </details>
 
 > [!IMPORTANT]
-> `command_guard` guards against mistakes and shortcuts. An agent determined to hide a command
-> (by writing it into a script first) needs the [sandbox](agents.md#sandbox).
+> Command checks operate on reported tool inputs. Use the [safety model](safety.md)
+> to understand how preflight checks, outcome checks and sandbox controls fit together.
 
 ## Rule packs
 
-`covenant compile --pack NAME` adds a ready-made rule set to your instruction (repeat `--pack`
-for several). Packs always compile offline, so a pack means the same rules everywhere.
+`covenant compile --pack NAME` adds a ready-made rule set to your instruction. Repeat
+`--pack` to combine several. Pack text is extracted offline, and Covenant grounds the rules
+in your repository. Use `--offline` for a run without Claude.
 
 | Pack | For | Rules |
 |---|---|---|
@@ -176,8 +180,8 @@ for several). Packs always compile offline, so a pack means the same rules every
 | `lockdown` | the strictest set | public API, keep tests, no new dependencies, no secrets, no installs, no network, no force push or history rewrite, no deploy or publish, test before commit |
 
 ```bash
-covenant compile --pack safe-refactor --pack secure "split utils.py into smaller modules"
-covenant amend --pack hotfix              # add a pack to the current task
+covenant compile --offline --pack safe-refactor --pack secure "split utils.py into smaller modules"
+covenant amend --offline --pack hotfix "also don't touch config/"
 ```
 
 ## Rules over the agent's steps

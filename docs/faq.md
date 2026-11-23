@@ -11,27 +11,27 @@
 <details>
 <summary><b>Do I need an Anthropic API key?</b></summary>
 
-No. `covenant compile` uses `ANTHROPIC_API_KEY` when it's set, and your Claude Code login
-otherwise, so a Claude subscription works. With neither, `--offline` uses a pattern extractor
-that understands the phrases in [this table](rules.md#what-the-compiler-understands). Packs always
-compile offline. Enforcement itself never calls Claude, except `llm_review` rules, which are
-advisory.
+Use `covenant compile --offline` for the built-in pattern extractor, or
+`--backend claude-code` with a logged-in Claude Code CLI. The API route uses
+`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`. Current source installs need the `anthropic`
+extra for that route. The advisory `llm_review` checker can also call Claude.
+[Compiler options](rules.md#compiling)
 </details>
 
 <details>
 <summary><b>Does it work with agents other than Claude Code?</b></summary>
 
-Yes. Cursor, Codex and any MCP client get an MCP server; the git hooks check every commit and
-push from any agent or person; CI checks every pull request. Only Claude Code's hooks can refuse
-an action *before* it runs without the agent's cooperation. See [Agents](agents.md).
+Cursor and Codex can call the MCP server. Git hooks and CI check changes from any author
+when installed. Claude Code's tool hooks can respond to supported events before an action runs.
+[Integration coverage](agents.md)
 </details>
 
 <details>
 <summary><b>Does it send my code anywhere?</b></summary>
 
-Checking is local. Compiling sends your instruction and a short summary of the repo (package
-names, data folders, test commands) to Claude, unless you use `--offline`. `llm_review` rules
-send the change being reviewed. Alerts go only where you point them.
+Deterministic verifiers run locally. Claude-assisted compilation can send your instruction
+and repository summary to Claude, and `llm_review` can send a diff. Alerts and remote team
+policies use their configured destinations. Use `--offline` to compile with the built-in extractor.
 </details>
 
 <details>
@@ -52,8 +52,9 @@ explain` says what happened, and an [alert](tools.md#alerts) can tell you on Sla
 <details>
 <summary><b>Does it slow the agent down?</b></summary>
 
-About 0.2 s per action with fast hooks (the default) on Windows. Commit checks take a couple of
-seconds on a typical repository (median 2.2 s across 50 real ones).
+A historical Windows measurement recorded about 0.2 s per action with fast hooks.
+Historical replay had a median of 2.2 s per commit across its sample. The [benchmark notes](../bench/README.md)
+describe the separate measurements and what they include.
 </details>
 
 <details>
@@ -78,11 +79,12 @@ rather not commit the Claude Code hook settings.
 | `covenant: command not found` after installing | Open a new terminal. With pipx, run `pipx ensurepath` once |
 | Windows install fails with a long-path error | Install into a short path (one dependency has very long file names), or turn on Windows long paths |
 | Every commit is blocked with "run tests before committing" | Run the declared command: `covenant test`. Runs of a subset (`-k`, a single file) or with piped output don't count |
-| The wrong test command was picked | Answer the question during `compile` (`--answer Q1=2`), or edit `test_cmd` in `covenant.yaml` and run `covenant start` |
+| The wrong test command was picked | Answer the compiler's question, or edit `params.test_cmd` on the relevant rule in `covenant.yaml` and run `covenant start` |
 | "Don't change public APIs" is `unenforceable` | No package was found. Set `package`/`root` (Python), `entries` (TypeScript) or `language` (Go, Rust, Java) on the rule |
 | TypeScript API check fails: typescript not found | Install the project's dependencies, or point `COVENANT_TYPESCRIPT` at any `typescript` package |
 | An `INTEGRITY` problem after editing `covenant.yaml` | Expected: run `covenant start` to approve the new rules |
 | I already use Git hooks | Use `covenant init --no-git`, then call `covenant hook pre-commit` and `covenant hook pre-push` from your hooks in Git's default directory. See [Git hooks](agents.md#git-hooks) for `core.hooksPath` behavior. |
+| VS Code says Covenant isn't installed | Set `covenant.pythonPath` to the interpreter that can run `python -m covenant --version`. [Extension setup](../vscode-extension/README.md#requirements) |
 | `compile` warns about `ANTHROPIC_BASE_URL` | Another tool exported it; set `COVENANT_ANTHROPIC_BASE_URL=https://api.anthropic.com` |
 | Hooks feel slow | Make sure fast hooks are on (the default); `COVENANT_NO_DAEMON` should be unset |
 | The dashboard shows nothing | Covenant shows repos it has enforced on this machine; run `covenant init` in one first |

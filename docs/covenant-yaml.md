@@ -60,7 +60,7 @@ The whole file may sit under a top-level `covenant:` key, as `compile` writes it
 | `id` | | Unique id, such as `C1`. Reports and `covenant explain` name rules by it |
 | `kind` | | `EffectProhibition`, `SemanticInvariant` or `TemporalObligation` ([below](#kind)) |
 | `source_span` | | The exact words of the instruction this rule came from |
-| `scope` | `[]` | What it applies to, in words, grounded in the repo |
+| `scope` | `[]` | Human-readable scope. Put checkable paths and limits in `params` |
 | `checker` | | Which checker enforces it ([settings](#checker-settings)); required unless `status` isn't `enforced` |
 | `params` | `{}` | The checker's settings |
 | `on_violation` | `block` | What happens when it's broken ([below](#on_violation)) |
@@ -86,7 +86,8 @@ The whole file may sit under a top-level `covenant:` key, as `compile` writes it
 | `ask_human` | The agent is stopped and the task is handed to you |
 | `warn` | Reported to the agent and to you, but never blocks (used by `llm_review`) |
 
-Whatever the setting, if the same rule blocks the agent **5 times**, Covenant hands over to you.
+Five counted blocks for the same rule trigger escalation. Preview checks and warnings
+do not count as blocks.
 
 ### `status`
 
@@ -98,16 +99,18 @@ Whatever the setting, if the same rule blocks the agent **5 times**, Covenant ha
 
 ## Checker settings
 
-Every checker also takes `baseline`: the git commit to compare against. Covenant pins it to the
-commit the task started from, so you rarely set it. Checkers that read the diff take `exclude`
-(globs to ignore) too.
+Set `baseline: HEAD` on a semantic rule that compares revisions to pin the starting commit
+when the task is approved. The compiler adds this where appropriate. When a diff-based
+rule omits `baseline`, its default comparison is the current `HEAD`. CI supplies its own
+merge base. The diff guards listed under **The change itself** support `exclude` globs,
+apart from `llm_review`.
 
 <details open>
 <summary><b>API and dependencies</b></summary>
 
 | Checker | Setting | Meaning |
 |---|---|---|
-| `api_surface_diff` (Python) | `package` | Import name, such as `mypkg` |
+| `api_surface_diff` (Python) | `package` | Required import name, such as `mypkg` |
 | | `root` | Folder holding the package, such as `src` (default: repo root) |
 | | `extra_modules` | Modules that count as public without being exported |
 | | `allow_additive` | New exports are fine (default `true`) |
@@ -132,7 +135,7 @@ commit the task started from, so you rarely set it. Checkers that read the diff 
 | | `paths` | Protected globs, repo-relative or `~/...`; `**` crosses folders |
 | | `exclude` | Globs carved out of `paths` |
 | | `db_tables` | Protected table names |
-| `sqlite_guard` | `databases` | SQLite files (paths or globs) |
+| `sqlite_guard` | `databases` | Required list of SQLite paths or globs |
 | | `tables` | Only these tables (default: all) |
 | | `forbid_updates` | Changed values count too (default `false`) |
 | `schema_guard` | `dirs` | Migration folders (default: common locations) |
@@ -144,7 +147,7 @@ commit the task started from, so you rarely set it. Checkers that read the diff 
 
 | Checker | Setting | Meaning |
 |---|---|---|
-| `scope_guard` | `allow` | Globs that may change, such as `src/**` |
+| `scope_guard` | `allow` | Required list of globs that may change, such as `src/**` |
 | | `allow_new` | New files may be added (default `true`) |
 | | `allow_delete` | Files may be deleted or renamed (default `true`) |
 | `secret_scan` | | No settings beyond `exclude` |
@@ -169,8 +172,8 @@ commit the task started from, so you rarely set it. Checkers that read the diff 
 | | `max_actions` | Edits, commands, web and MCP calls (reads and searches don't count) |
 | | `max_cost_usd` | Estimated spend, from Claude Code's session log |
 | `path_owner` | `owners` | `{"billing/**": ["payments"]}`: which agents may change which folders |
-| `trace_monitor` | `formula` | A [step formula](rules.md#rules-over-the-agents-steps) |
-| | `test_cmd` | The command that counts as a test run |
+| `trace_monitor` | `formula` | Required [step formula](rules.md#rules-over-the-agents-steps) |
+| | `test_cmd` | Test command for this rule. Define it inside the rule's `params` |
 </details>
 
 ## Changing the file

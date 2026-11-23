@@ -2,19 +2,21 @@
 
 <p align="center"><sub><a href="../README.md">Covenant</a> › <a href="README.md">Docs</a> › Agents</sub></p>
 
-Covenant enforces the same rules whichever agent does the work. Pick the setup that matches
-yours; the git hooks and CI cover everyone.
+Choose an integration based on the checkpoints you need. Git hooks and CI can check changes
+from any author. Preflight checks and step rules depend on which events the integration records.
 
 **On this page:** [Claude Code](#claude-code) · [Cursor, Codex and other MCP clients](#cursor-codex-and-other-mcp-clients) ·
 [Any other agent](#any-other-agent) · [Git hooks](#git-hooks) · [Hook server](#hook-server) ·
 [Sandbox](#sandbox) · [VS Code](#vs-code)
 
-| Agent | Before an action | At commit and push | In CI |
-|---|:-:|:-:|:-:|
-| Claude Code | ✅ hooks | ✅ | ✅ |
-| Cursor, Codex, MCP clients | ☑️ when the agent calls the MCP tools | ✅ | ✅ |
-| Any agent, or a human | ☑️ with `covenant record` | ✅ | ✅ |
-| Anything in `covenant sandbox` | ✅ plus network and state isolation | ✅ | ✅ |
+| Integration | Action and event coverage | Git checkpoints |
+|---|---|---|
+| Claude Code | Tool preflight and session events through installed Claude Code hooks | Installed Git hooks can independently check commits and pushes |
+| Cursor, Codex and other MCP clients | Checks and events when the client calls Covenant's tools | Install Git hooks separately |
+| Other agents and scripts | Events supplied through `covenant record` and `covenant test` | Install Git hooks separately |
+| Docker sandbox | Claude Code HTTP hooks when using Claude Code, plus a proxy and separate hook state | Git hooks provided inside the container |
+
+Configure [CI](ci.md) separately to check repository changes from any of these integrations.
 
 ---
 
@@ -46,7 +48,8 @@ sends an [alert](tools.md#alerts) if you set one up).
 Each hook starts a tiny client that uses only Python's standard library and hands the event to
 a background `covenant daemon` for the repo, which keeps Covenant loaded.
 
-- About **0.2 s** per agent action on Windows, instead of about 1 s.
+- A historical Windows measurement was about **0.2 s** per agent action. The labeled hook
+  benchmark measures in-process checks separately. [Benchmark methodology](../bench/README.md#labeled-hook-decisions)
 - When no daemon answers, the client runs the full check itself and starts one, so a missing
   daemon never skips a check.
 - The daemon listens on 127.0.0.1 only, exits after 30 idle minutes (`--idle` seconds), and
@@ -80,7 +83,6 @@ COVENANT_AGENT=payments claude
 <tr><td>
 
 ```json
-// .cursor/mcp.json
 {
   "mcpServers": {
     "covenant": { "command": "covenant", "args": ["--repo", ".", "mcp"] }
@@ -100,6 +102,9 @@ args = ["--repo", "/path/to/repo", "mcp"]
 </td></tr>
 </table>
 
+The Cursor example belongs in `.cursor/mcp.json`. Use an absolute repository path if the
+client launches the server from a different directory.
+
 > [!IMPORTANT]
 > MCP only works when the agent chooses to call it, so for these agents the [git hooks](#git-hooks)
 > (and [CI](ci.md)) are what enforce commits and pushes. Tell the agent to call
@@ -107,7 +112,9 @@ args = ["--repo", "/path/to/repo", "mcp"]
 
 ## Any other agent
 
-Any tool (or script) can feed Covenant what it did, so step rules and side-effect checks work:
+Tools and scripts can feed Covenant events for step rules and side-effect checks. These
+commands report events that already happened. Use `covenant test` to execute and record the
+declared tests.
 
 ```bash
 covenant record edit src/app.py
@@ -119,21 +126,34 @@ covenant record effect delete data/users.db         # --db when the target is a 
 
 ## Git hooks
 
-`covenant init` (or `covenant install-hooks`) installs `pre-commit` and `pre-push` hooks. They
-check every commit and push, whoever makes it: any agent, or a human.
+`covenant init` installs `pre-commit` and `pre-push` hooks and starts a task.
+`covenant install-hooks` installs only the hooks. Git invokes them at commit and push.
+The current source refuses installation when either hook belongs to another tool or when
+`core.hooksPath` redirects hooks. PyPI 0.1.2 overwrites existing hooks in the default
+directory. [Compatibility](compatibility.md)
 
-> [!WARNING]
-> On the current branch, Covenant preserves existing Git hooks. Use `covenant init --no-git`
-> and call `covenant hook pre-commit` and `covenant hook pre-push` from your hooks in `.git/hooks`.
-> Covenant reports `core.hooksPath` redirection as an integrity issue, so this setup uses Git's
-> default hook directory. Published version 0.1.2 replaces existing default Git hooks, so use
-> `--no-git` there as well.
+To use existing hooks in Git's default directory, add the corresponding call to each hook
+before its successful exit. That hook must return a nonzero status when Covenant fails.
+
+```sh
+# In .git/hooks/pre-commit
+covenant hook pre-commit || exit $?
+
+# In .git/hooks/pre-push
+covenant hook pre-push || exit $?
+```
+
+Run `covenant init --no-git` after wiring the hooks so Covenant pins the finished setup.
+Start a new task with `covenant start` after later hook changes. Set an absolute Covenant
+executable path if Git's environment lacks it. Covenant reports custom `core.hooksPath`
+settings as an integrity issue, even if installation is skipped.
 
 ## Hook server
 
-`covenant serve --install` runs Covenant as a long-lived local server and points Claude Code
-(HTTP hooks, at `/hook`) and the git hooks (via `curl`) at it. Git refuses the commit if the
-server is unreachable.
+`covenant serve --install` installs Claude Code HTTP hooks and Git hooks that call the server
+with `curl`. Run `covenant start` in a second terminal after installation to approve the
+changed hook files, using the same repository, rules file and state directory. Git refuses
+commits and pushes through these hooks if the server is unreachable.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -141,11 +161,11 @@ server is unreachable.
 | `--bind` | `127.0.0.1` | Address to listen on |
 | `--url` | `http://127.0.0.1:<port>` | The address hooks should call (when it differs, as in a container) |
 | `--install` | | Point the hooks at this server, then start it |
+| `--start-task` | | Approve the current rules and pin baselines before serving. Use with hooks that already point to the server |
 
-State and snapshots then live with the server instead of wherever the agent runs, which is the
-building block for running agents in a container. Requests need a bearer token created at start
-(or `COVENANT_HOOK_TOKEN`); that keeps other local processes out, but not an agent that can read
-the hook settings.
+Task state and snapshots live with the server. Hook requests require a bearer token stored
+in the state directory or supplied through `COVENANT_HOOK_TOKEN`. Processes that can read
+the hook settings can use the same token.
 
 ## Sandbox
 
@@ -167,10 +187,17 @@ network. The proxy also attaches to an outside network for allowlisted HTTP and 
    └─────────────┘
 ```
 
-The agent container mounts the working repository and read-only hook configuration. The hook
-service keeps runtime state in its own volume. Proxy requests can reach allowlisted hosts and
-their subdomains. The agent image comes with Claude Code, Git, Python and curl.
-Use a Covenant file inside the mounted repository and a state directory outside it.
+The agent container mounts the working repository with write access and mounts the generated
+hook configuration read-only. The hook service keeps runtime state in its own volume.
+The proxy allows Anthropic endpoints by default and adds hosts from network rules and repeatable
+`--allow` flags, including subdomains. The agent image comes with Claude Code, Git, Python and
+`curl`. Launching Claude Code can use `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
+from the host environment.
+
+Use Docker Compose v2 and run from a disposable checkout while trying the sandbox. The rules
+file must be inside the mounted repository, and the host state directory must be outside it.
+`--print` generates the files and shows the Compose commands. A normal run stops the services
+when the agent command exits.
 
 ```bash
 covenant sandbox                        # runs Claude Code

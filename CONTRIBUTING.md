@@ -10,19 +10,26 @@ Bug reports, new checkers, benchmark tasks and fixes are all welcome. Thanks for
 
 ## Set up
 
+Use Python 3.11 or newer and Git. Activate a virtual environment in the repository root
+before installing. The development and Anthropic extras match the Python test jobs.
+
 ```bash
-pip install -e ".[dev]"
-npm install --prefix /tmp/ts typescript@5.6.3   # for the TypeScript checker tests
-COVENANT_TYPESCRIPT=/tmp/ts/node_modules/typescript python -m pytest -q
+python -m pip install -e ".[dev,anthropic]"
+python -m pytest -q
 ```
 
-Without `COVENANT_TYPESCRIPT` the TypeScript tests are skipped. The VS Code extension has its
-own tests:
+Use Node.js 22 and install the editor's locked dependencies to enable the TypeScript checker
+tests. Point `COVENANT_TYPESCRIPT` to the package if Node cannot resolve it by name.
 
 ```bash
-cd vscode-extension
-npm install
-npm test
+npm --prefix vscode-extension ci
+COVENANT_TYPESCRIPT="$PWD/vscode-extension/node_modules/typescript" python -m pytest -q
+```
+
+```powershell
+npm --prefix vscode-extension ci
+$env:COVENANT_TYPESCRIPT = (Resolve-Path 'vscode-extension/node_modules/typescript').Path
+python -m pytest -q
 ```
 
 ## Where things are
@@ -47,18 +54,25 @@ npm test
 | `bench/tasks/`, `bench/replay/` | Benchmark tasks; replay repo list and results |
 | `examples/mylib` | The worked example |
 | `vscode-extension/` | The VS Code extension |
-| `docs/` | These docs; `docs/assets/` holds the artwork (SVG) |
+| `docs/` | User guides, references, verification notes and artwork |
+| `scripts/verify_distribution.py` | Published and candidate wheel lifecycle smoke checks |
+| `.github/workflows/` | CI matrix and release publishing |
 
 ## Before opening a pull request
 
-- [ ] Add or update tests for what you changed. Every checker is tested against real files and
-      git history, not mocks.
-- [ ] Run the whole Python suite and, if you touched `vscode-extension/`, `npm test`.
+- [ ] Cover behavior changes with tests using the relevant files, Git history or event fixtures.
+- [ ] Run the Python suite. For editor changes, also run the extension unit suite and the
+      [VS Code integration suite](vscode-extension/README.md#build).
+- [ ] For sandbox changes, run the [Docker Compose smoke test](docs/safety.md#docker-verification).
 - [ ] If you changed enforcement, run the benchmark and make sure no mode got worse:
       `covenant bench run --mode prompt --mode covenant --mode groundtruth`.
 - [ ] If you changed a checker, replay real history and compare the flagged commits:
       `covenant bench replay --only pallets/click,sindresorhus/ky,spf13/cobra`.
-- [ ] Keep the README and [docs](docs/README.md) in step with what the code does.
+- [ ] Keep the README and [docs](docs/README.md) in step with what the code does. Update
+      the [compatibility matrix](docs/compatibility.md) when released and source behavior differ.
+
+The [CI workflow](.github/workflows/ci.yml) lists the Ruff, mypy, benchmark and integration
+commands used in CI.
 
 ## Adding a checker
 
@@ -71,9 +85,24 @@ npm test
 ## Releasing
 
 Bump the version in `pyproject.toml`, `src/covenant/__init__.py` and
-`vscode-extension/package.json`, add a `CHANGELOG.md` entry, and push a `v<version>` tag. The
-release workflow tests, builds, publishes to PyPI and (when the `VSCE_PAT` secret is set) the VS Code Marketplace, and attaches the
-wheel, sdist and `.vsix` to a GitHub release.
+`vscode-extension/package.json`. Refresh the extension's lockfile and move the Unreleased
+notes to a dated [changelog entry](CHANGELOG.md).
+
+Build the wheel and verify it in an isolated environment before tagging. Pass the candidate
+wheel by its full filename.
+
+```bash
+python -m pip install build
+python -m build --wheel
+python scripts/verify_distribution.py covenant-agents==0.1.2 --upgrade-from covenant-agents==0.1.1 --candidate dist/covenant_agents-0.1.2-py3-none-any.whl
+```
+
+Replace the candidate filename after a version bump.
+
+Push a `v<version>` tag that matches `pyproject.toml`. The
+[release workflow](.github/workflows/release.yml) publishes through PyPI Trusted Publishing
+in the `pypi` environment, publishes to the Marketplace when `VSCE_PAT` is set, and attaches
+the wheel, source distribution and `.vsix` to the GitHub release.
 
 ## Reporting security problems
 

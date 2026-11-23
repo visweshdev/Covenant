@@ -3,12 +3,13 @@
 <p align="center">
   <a href="../README.md">← Back to the README</a> &nbsp;·&nbsp;
   <a href="getting-started.md"><b>Start here</b></a> &nbsp;·&nbsp;
-  <a href="faq.md">FAQ</a>
+  <a href="faq.md">FAQ</a> &nbsp;·&nbsp;
+  <a href="compatibility.md">Compatibility</a>
 </p>
 
 <br>
 
-<p align="center"><img src="assets/how-it-works.svg" width="100%" alt="How Covenant works: plain English, compiled to typed rules, enforced while the agent works, at commit and push, and on every pull request"></p>
+<p align="center"><img src="assets/how-it-works.svg" width="100%" alt="Covenant compiles plain English into typed rules that can run through agent hooks, Git hooks, and CI"></p>
 
 ## Guides
 
@@ -79,12 +80,14 @@
 
 | I want to… | Read |
 |---|---|
-| Try Covenant on a repo in two minutes | [Getting started](getting-started.md) |
+| Install Covenant and approve a first task | [Getting started](getting-started.md) |
+| Keep my existing Git hooks | [Manual hook setup](agents.md#git-hooks) |
 | Stop an agent from force pushing, deploying or running `DROP TABLE` | [Refused commands](rules.md#refused-commands) |
 | Keep an agent inside `src/` | [What the compiler understands](rules.md#what-the-compiler-understands) |
 | Make sure tests pass before every commit | [Rules over the agent's steps](rules.md#rules-over-the-agents-steps) |
 | Cap a task's time or cost | [Budgets](rules.md#refused-commands) |
 | Use Covenant with Cursor or Codex | [MCP clients](agents.md#cursor-codex-and-other-mcp-clients) |
+| Run an agent in Docker | [Sandbox](agents.md#sandbox) |
 | Check pull requests | [GitHub Action](ci.md#github-action) |
 | Undo what an agent did | [Undo](tools.md#undo) |
 | Get a Slack message when an agent is stuck | [Alerts](tools.md#alerts) |

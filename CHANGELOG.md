@@ -4,6 +4,22 @@
 
 ---
 
+## Unreleased
+
+- The base install uses the offline compiler and Claude Code login without the Anthropic
+  SDK. Install the `anthropic` extra to compile or review through the API.
+- The Git hook installers refuse to replace existing hooks or install into a repo using
+  `core.hooksPath`. Existing default-directory hooks can
+  [call Covenant directly](docs/agents.md#git-hooks).
+- The Docker sandbox builds its hook image from the installed package, uses a dedicated
+  state volume, pins each task before the agent starts, and waits for healthy services.
+  The proxy returns HTTP 502 for upstream connection failures.
+- CI now runs cross-platform wheel lifecycle checks, a Docker Compose smoke test, and
+  real VS Code integration tests on Linux. Benchmark tooling gained a labeled hook-decision
+  check and command-agent argument and hook selection.
+- Refreshed the README, user guides, CLI and rules references, and contributor setup.
+  The [compatibility matrix](docs/compatibility.md) records which checks ran.
+
 ## 0.1.2 (2026-11-02)
 
 - **Replayed on 50 real repositories** (`covenant bench replay`): the last 30 commits of 50

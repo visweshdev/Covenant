@@ -17,8 +17,8 @@ These go before the command: `covenant --repo ../api status`.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--repo PATH` | current folder | The repository to act on |
-| `--covenant FILE` | `<repo>/covenant.yaml` | The rules file |
-| `--state-dir DIR` | `~/.covenant/workspaces/<repo>-<hash>` | Where the task's state and snapshots live |
+| `--covenant FILE` | `<repo>/covenant.yaml` | Explicit rules file, resolved relative to the shell's working directory |
+| `--state-dir DIR` | `~/.covenant/workspaces/<repo>-<hash>` | Task state location. Relative paths start at the shell's working directory |
 | `--version` | | Print the version |
 
 ## Set up and rules
@@ -31,7 +31,12 @@ These go before the command: `covenant --repo ../api status`.
 | `covenant validate` | Checks `covenant.yaml` without starting anything | |
 | `covenant init` | Validates, installs git and Claude Code hooks, starts a task | `--local`, `--no-claude`, `--no-git`, `--no-fast-hooks` |
 | `covenant start` | Approves the current `covenant.yaml` and begins a fresh task | |
-| `covenant amend "<instruction>"` | Adds rules mid-task, keeping the history; only additions are accepted | same as `compile` (instruction optional with `--pack`) |
+| `covenant amend "<instruction>"` | Adds rules mid-task and keeps existing history | `--pack NAME` (repeatable), `--offline`, `--backend auto\|api\|claude-code`, `--model`, `--no-review`, `--unattended`, `--answer Q1=2`, `--yes`, `--dry-run` |
+
+For automation, `compile --unattended --yes` accepts conservative answers and writes
+the file. Use `compile --dry-run --format json` to inspect a draft without writing it.
+For a pack-only amendment, pass an empty instruction where supported by your shell or
+combine the pack with a real instruction.
 
 ## During a task
 
@@ -42,9 +47,9 @@ These go before the command: `covenant --repo ../api status`.
 | `covenant test` | Runs the declared test command and records the result | |
 | `covenant explain` | Why something was blocked and what can be done | `-n N`, `--format text\|json` |
 | `covenant snapshots` | Lists restore points | |
-| `covenant snapshot` | Takes a restore point now | |
+| `covenant snapshot [LABEL]` | Takes a restore point now | Optional label (default `taken by hand`) |
 | `covenant undo [ID]` | Restores a restore point (default: the latest) | `--yes` |
-| `covenant alerts [test]` | Shows the alert settings, or sends a test alert | |
+| `covenant alerts [show\|test]` | Shows alert settings by default or sends a test alert | |
 | `covenant dashboard` | Opens the local dashboard | `--port` (8765), `--no-open`, `--read-only` |
 | `covenant record ...` | Tells Covenant what an agent did, for agents without hooks: `edit PATH`, `run CMD --exit-code N`, `commit [--sha]`, `push [--remote]`, `effect OP TARGET [--db]` | |
 
@@ -54,8 +59,8 @@ These go before the command: `covenant --repo ../api status`.
 |---|---|---|
 | `covenant ci` | Checks a pull request | `--base REF`, `--format text\|github\|json`, `--no-tests`, `--comment` |
 | `covenant mcp` | Runs the MCP server on stdio | |
-| `covenant serve` | Runs the hook server | `--port` (8787), `--bind` (127.0.0.1), `--url`, `--install` |
-| `covenant sandbox [-- CMD]` | Runs the agent in Docker with the internet and Covenant's state out of reach | `--allow HOST`, `--print` |
+| `covenant serve` | Runs the hook server | `--port` (8787), `--bind` (127.0.0.1), `--url`, `--install` or `--start-task` (current source) |
+| `covenant sandbox [-- CMD]` | Runs the agent in Docker with an allowlisted HTTP(S) proxy and separate hook state | `--allow HOST` (repeatable), `--print` |
 | `covenant install-hooks` | Installs only the git hooks | |
 | `covenant install-claude` | Installs only the Claude Code hooks | `--local`, `--no-fast-hooks` |
 | `covenant hook pre-commit\|pre-push` | What the git hooks run; call it from another hook manager | |
@@ -66,11 +71,12 @@ These go before the command: `covenant --repo ../api status`.
 
 | Command | What it does | Flags |
 |---|---|---|
-| `covenant bench run` | Runs CovenantBench tasks | `--mode` (repeatable), `--agent scripted\|command`, `--agent-cmd`, `--llm`, `--only`, `--tasks`, `--out` |
+| `covenant bench run` | Runs CovenantBench tasks | `--mode prompt\|covenant\|covenant-unattended\|groundtruth` (required, repeatable), `--agent scripted\|command`, `--agent-cmd` or repeatable `--agent-arg`, `--agent-name`, `--agent-hooks git\|claude-code`, `--llm`, `--only` (repeatable), `--tasks`, `--out` |
 | `covenant bench report FILE...` | Scores result files | |
 | `covenant bench replay [repos.txt]` | Judges real repos' recent commits with the CI check, running nothing from them | `--commits` (30), `--jobs` (4), `--only`, `--work`, `--out`, `--report FILE` |
 
-See [bench/README.md](../bench/README.md) for both.
+See the [benchmark README](../bench/README.md) for examples, defaults and released-version
+differences.
 
 ## Exit codes
 
@@ -79,7 +85,12 @@ See [bench/README.md](../bench/README.md) for both.
 | `0` | Clean |
 | `1` | Violations: the agent should revise |
 | `2` | Needs a human |
-| `3` | Bad setup (no rules file, not a git repo, invalid rules) |
+| `3` | Setup or configuration error |
+
+This table describes Covenant's local enforcement decisions. `covenant ci` returns `1`
+for any report, including one that requires human review. `covenant sandbox` returns its
+agent command's exit status after a successful launch. Inspect the report produced by
+`covenant bench run` for task outcomes.
 
 ## Environment variables
 
@@ -96,8 +107,10 @@ See [bench/README.md](../bench/README.md) for both.
 | `COVENANT_SLACK_WEBHOOK`, `COVENANT_ALERT_WEBHOOK`, `COVENANT_ALERT_EMAIL` | Where alerts go |
 | `COVENANT_SMTP_PASSWORD` | The SMTP password for email alerts (the variable name can be changed in `alerts.yaml`) |
 | `COVENANT_HOOK_TOKEN` | The hook server's token (set by the sandbox) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code token passed through to the sandbox agent |
 | `COVENANT_TYPESCRIPT` | A `typescript` package to use when the project has none installed |
 | `GITHUB_TOKEN` / `GH_TOKEN` | Lets `covenant ci --comment` post to the pull request |
+| `GITHUB_BASE_REF`, `GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`, `GITHUB_STEP_SUMMARY` | GitHub Actions context for base detection, PR comments and the job summary |
 
 `suggest --github` uses the `gh` CLI's own login.
 
@@ -109,7 +122,8 @@ See [bench/README.md](../bench/README.md) for both.
 | `.git/hooks/pre-commit`, `pre-push` | The git hooks |
 | `.claude/settings.json` (or `settings.local.json`) | The Claude Code hooks |
 | `~/.covenant/workspaces/<repo>-<hash>/` | The task's state: `session.json`, `trace.jsonl`, `reports.jsonl`, the approved rules, snapshots, `history/` (last 30 tasks) |
-| `refs/covenant/snapshots/*` (in the repo) | Restore points; never pushed |
+| `refs/covenant/snapshots/*` (in the repo) | Local restore refs outside ordinary branch pushes |
+| `<state-dir>/sandbox/` | Generated Compose configuration, hook files and local hook token |
 | `~/.covenant/alerts.yaml` | Alert settings ([format](tools.md#alerts)) |
 | `~/.covenant/policies/` | Cached team policies fetched from https |
 

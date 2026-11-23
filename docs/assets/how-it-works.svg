@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="How Covenant works: you write rules in plain English, covenant compile turns them into typed rules in covenant.yaml, and they are enforced while the agent works, at commit and push, and on every pull request">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="Covenant compiles plain English into typed rules that can run through agent hooks, Git hooks, and CI">
   <title>How Covenant works</title>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
@@ -66,8 +66,8 @@
       <text x="22" y="156" fill="#d9a95b">C3</text><text x="52" y="156" fill="#f4efe6">sqlite_guard</text>
       <text x="22" y="192" fill="#d9a95b">C4</text><text x="52" y="192" fill="#f4efe6">trace_monitor</text>
     </g>
-    <text class="sans" x="22" y="240" font-size="13.5" fill="#a59b8c">19 checkers. Rules none</text>
-    <text class="sans" x="22" y="260" font-size="13.5" fill="#a59b8c">cover go to Claude review.</text>
+    <text class="sans" x="22" y="240" font-size="13.5" fill="#a59b8c">19 checkers, including</text>
+    <text class="sans" x="22" y="260" font-size="13.5" fill="#a59b8c">optional Claude review.</text>
   </g>
 
   <!-- branches -->
@@ -81,7 +81,7 @@
       <rect class="card" width="236" height="86" rx="14"/>
       <text class="step" x="20" y="30">WHILE THE AGENT WORKS</text>
       <text x="20" y="56" font-size="16" fill="#1d1b19" font-weight="600">Claude Code hooks · MCP</text>
-      <text x="20" y="75" font-size="13" fill="#5c544a">refused before it runs</text>
+      <text x="20" y="75" font-size="13" fill="#5c544a">tool hooks and client checks</text>
     </g>
     <g transform="translate(930 167)" filter="url(#shadow)">
       <rect class="card" width="236" height="86" rx="14"/>
@@ -91,9 +91,9 @@
     </g>
     <g transform="translate(930 272)" filter="url(#shadow)">
       <rect class="card" width="236" height="86" rx="14"/>
-      <text class="step" x="20" y="30">ON EVERY PULL REQUEST</text>
+      <text class="step" x="20" y="30">IN PULL REQUEST CI</text>
       <text x="20" y="56" font-size="16" fill="#1d1b19" font-weight="600">GitHub Action</text>
-      <text x="20" y="75" font-size="13" fill="#5c544a">base commit's rules, line comments</text>
+      <text x="20" y="75" font-size="13" fill="#5c544a">base rules and annotations</text>
     </g>
   </g>
 </svg>

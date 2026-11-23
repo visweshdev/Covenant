@@ -19,12 +19,10 @@
 
 <br>
 
-You tell an agent *"don't change public APIs, don't delete user data, run tests before
-committing."* It usually listens. **Covenant makes sure it does.**
-
-It checks **outcomes, not tool calls**: the API surface after the edits, what happened to
-protected files however they were touched, and the order of events (tests passed *after* the
-last edit, *before* the commit).
+Covenant turns plain-English instructions into repository rules for coding agents. Use it to
+check for public API changes, protect data files, and require a passing test run after the last
+recorded edit. It checks changes and recorded events at supported checkpoints, and Claude Code
+hooks can refuse covered actions before they run.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/demo.svg" width="100%" alt="Animated illustration: an agent tries a force push, destructive SQL and an untested commit; Covenant refuses each, then allows the commit once the tests pass">
@@ -38,20 +36,28 @@ pipx install covenant-agents        # or: pip install covenant-agents
 
 ```bash
 cd your-repo
-covenant compile "Don't change public APIs, don't delete user data, run tests before committing."
-covenant init        # installs git + Claude Code hooks and starts enforcing
+covenant compile --offline "Don't change public APIs, don't delete user data, run tests before committing."
+covenant init
+covenant status
 ```
 
-That's it. Works on **Windows, macOS and Linux** with Python 3.11+. The [getting started guide](https://github.com/visweshdev/Covenant/blob/main/docs/getting-started.md) walks through what happens next.
+Run this in a Git repository with at least one commit. Review the draft before accepting
+`covenant.yaml`. The example uses the offline compiler, which works without Claude credentials.
+`covenant init` installs Git and Claude Code hooks and approves the rules for a new task.
+Covenant requires Python 3.11+ and Git and supports Windows, macOS and Linux.
 
-> 💡 **Tip:** start from a ready-made rule set with `covenant compile --pack hotfix "fix the login crash"`
-> (`covenant packs` lists them), or let `covenant suggest` propose rules from what went wrong in
-> your repo's own history.
+**Already have Git hooks?** Use `covenant init --no-git` and integrate Covenant with your
+hooks. PyPI 0.1.2 replaces existing default hooks, while the current source refuses to
+overwrite them. [Git hook setup](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md#git-hooks)
+
+> Start with a rule pack using `covenant compile --offline --pack hotfix "fix the login crash"`.
+> Run `covenant packs` to list the packs or `covenant suggest` to propose rules from the
+> repository's history.
 
 ## How it works
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/how-it-works.svg" width="100%" alt="You write rules in plain English; covenant compile grounds them in the repo and binds each to a checker in covenant.yaml; they are enforced while the agent works, at commit and push, and on every pull request">
+  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/how-it-works.svg" width="100%" alt="Covenant compiles plain English into typed rules that can run through agent hooks, Git hooks, and CI">
 </p>
 
 When something breaks a rule, the agent gets the rule, the evidence and a fix, and you can ask
@@ -67,7 +73,7 @@ Rule C3: "never run destructive SQL"
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/features.svg" width="100%" alt="Checks outcomes, not tool calls. Refuses risky commands before they run. Undo with restore points. Explains every block. Works with every agent. CI rules a pull request can't weaken.">
+  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/features.svg" width="100%" alt="Outcome checks, tool preflight, restore points, violation reports, agent integrations, and CI checks">
 </p>
 
 ## What it can enforce
@@ -77,16 +83,16 @@ Say it in plain English; Covenant picks the checker.
 | You say | Covenant checks |
 |---|---|
 | *"don't change public APIs"* | Exported names and signatures in Python, TypeScript, Go, Rust and Java |
-| *"don't delete user data"*, *"don't touch config/"* | Protected files and SQLite rows, put back from a snapshot if lost |
+| *"don't delete user data"*, *"don't touch config/"* | Protected paths and SQLite data, with recovery for rules configured to roll back |
 | *"no destructive migrations"* | No dropped tables or columns, truncation or type changes |
 | *"only update requests"*, *"no new dependencies"* | Only allowed packages change, majors stay put |
 | *"only change files in src/"* | The change stays inside the folders you name |
 | *"don't commit secrets"*, *"don't skip tests"* | Keys, tokens and `.env` files; deleted, skipped or `.only` tests |
 | *"keep the change under 200 lines"* | Files and lines changed |
-| *"no debug prints"*, *"don't silence type errors"* | Leftover breakpoints and logs; new `noqa`, `@ts-ignore` and friends |
+| *"no debug prints"*, *"don't silence type errors"* | Leftover breakpoints and logs, plus new type-checker suppressions such as `@ts-ignore` |
 | *"run tests before committing"*, *"push at most once"* | The order and count of the agent's steps |
 | *"never force push"*, *"don't deploy"*, *"never run destructive SQL"* | Refused before they run (16 categories) |
-| *"only reach pypi.org and github.com"* | A network allowlist for commands, git remotes, installs and fetches |
+| *"only reach pypi.org and github.com"* | A host allowlist for recognized commands, Git remotes, installs and fetches |
 | *"only the payments agent may edit billing/"* | Folder ownership between agents |
 | *"stop after 20 minutes"*, *"spend at most $2"* | Time, action and cost budgets |
 
@@ -96,14 +102,14 @@ Say it in plain English; Covenant picks the checker.
 
 <table>
 <tr>
-  <td width="33%" valign="top"><h3>🤖 Claude Code</h3>Hooks on every tool call. Refuses bad actions, records test runs, and won't let Claude finish while a rule is broken.</td>
-  <td width="33%" valign="top"><h3>🧩 Cursor, Codex, any MCP client</h3>An MCP server with the rules, a preflight check and a test runner. Git hooks enforce commits and pushes.</td>
-  <td width="33%" valign="top"><h3>🌿 Git</h3>Pre-commit and pre-push hooks that check every commit and push, from any agent or a human.</td>
+  <td width="33%" valign="top"><h3>🤖 Claude Code</h3>Tool hooks can refuse covered actions, record test runs and request revisions at task end.</td>
+  <td width="33%" valign="top"><h3>🧩 Cursor, Codex and MCP</h3>Clients can query rules, check commands and run tests through the MCP server.</td>
+  <td width="33%" valign="top"><h3>🌿 Git</h3>Installed pre-commit and pre-push hooks check the changes Git presents to Covenant.</td>
 </tr>
 <tr>
-  <td width="33%" valign="top"><h3>✅ GitHub</h3>An Action that judges each PR by its base commit's rules and comments on the exact lines.</td>
+  <td width="33%" valign="top"><h3>✅ GitHub</h3>An Action that checks changes against the base rules and can comment on findings.</td>
   <td width="33%" valign="top"><h3>🧑‍💻 VS Code</h3>A rules panel, violations in Problems, and a 🔒 badge on every protected file.</td>
-  <td width="33%" valign="top"><h3>🐳 Docker</h3><code>covenant sandbox</code> runs the agent behind an allowlist proxy, with Covenant's state out of reach.</td>
+  <td width="33%" valign="top"><h3>🐳 Docker</h3><code>covenant sandbox</code> runs the agent with an HTTP(S) allowlist proxy and a separate hook state volume.</td>
 </tr>
 </table>
 
@@ -112,10 +118,13 @@ Say it in plain English; Covenant picks the checker.
   <a href="https://github.com/visweshdev/Covenant/blob/main/docs/ci.md"><b>CI and the GitHub Action →</b></a>
 </p>
 
-## Tried on real repos
+See the [safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md) for
+local hook, sandbox, and CI boundaries.
+
+## Evaluation
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/stats.svg" width="100%" alt="Violations per task fell from 1.17 to 0 on CovenantBench; task success stayed at 100%; 1,446 real commits from 50 repos checked, 72 of 75 flags were real rule breaks; about 0.2 seconds per agent action">
+  <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/stats.svg" width="100%" alt="Six scripted task results, historical replay of 1,446 commits, and a historical Windows fast-hook measurement">
 </p>
 
 Claude Code ran live under Covenant on [TinyDB](https://github.com/msiemens/tinydb),
@@ -124,9 +133,12 @@ Claude Code ran live under Covenant on [TinyDB](https://github.com/msiemens/tiny
 [prettytable](https://github.com/prettytable/prettytable), each with an honest task and a trap
 task. Every honest task committed; every trap was refused or blocked.
 
-Covenant also **replayed 1,446 real commits from 50 popular repositories** (Python, TypeScript,
-Go, Rust and Java) through its CI check. It flagged 75; on review, 72 were real breaks of the
-rules (removed APIs, new dependencies, deleted tests) and 2 were false alarms.
+The six scripted CovenantBench tasks averaged **1.17 violations per task with the instruction
+alone and 0 with Covenant and developer answers**. Both modes completed all six tasks.
+
+A historical replay of **1,446 commits from 50 repositories** flagged 75 commits. Review found
+72 rule breaks, two false alarms and one unclear case. Only flagged commits were reviewed,
+so the replay cannot estimate recall.
 
 <p align="right"><a href="https://github.com/visweshdev/Covenant/blob/main/bench/README.md"><b>Benchmark and trial notes →</b></a></p>
 
@@ -154,6 +166,7 @@ rules (removed APIs, new dependencies, deleted tests) and 2 were false alarms.
 | 🧰 | [Tools](https://github.com/visweshdev/Covenant/blob/main/docs/tools.md) | Dashboard and replay, undo, explain, alerts, suggest, team policies |
 | ⌨️ | [Commands](https://github.com/visweshdev/Covenant/blob/main/docs/commands.md) | Every command and flag, exit codes, environment variables, files |
 | 🛡️ | [Safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md) | What Covenant protects against, its limits, what isn't built yet |
+| 🔎 | [Compatibility](https://github.com/visweshdev/Covenant/blob/main/docs/compatibility.md) | Published wheel and source differences, tested versions, and verification scope |
 | ❓ | [FAQ](https://github.com/visweshdev/Covenant/blob/main/docs/faq.md) | Common questions and fixes for common problems |
 
 ## Contributing
