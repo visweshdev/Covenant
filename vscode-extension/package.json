@@ -192,5 +192,8 @@
       "supported": "limited",
       "description": "Covenant requires a repository on the extension host filesystem."
     }
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
   }
 }

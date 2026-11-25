@@ -33,9 +33,9 @@ export class CovenantCli {
   }
 
   /** Runs a command whose stdout is JSON. Exit codes 0-2 are normal (2 = needs a human). */
-  async json<T>(args: string[], timeoutMs?: number): Promise<T> {
+  async json<T>(args: string[], timeoutMs?: number, maxExitCode = 2): Promise<T> {
     const result = await this.run(args, timeoutMs);
-    if (result.code < 0 || result.code > 2 || !result.stdout.trim()) {
+    if (result.code < 0 || result.code > maxExitCode || !result.stdout.trim()) {
       throw new CovenantCliError(args[0], result);
     }
     try {

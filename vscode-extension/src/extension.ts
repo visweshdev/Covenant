@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { CovenantCli, CovenantCliError } from "./cli";
+import { preservePolicies, readPolicy, writeDraft } from "./draft";
 import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
 import { selectPython, setting } from "./python";
@@ -321,19 +322,13 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   const compiler = setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [];
   const base = ["compile", instruction, "--unattended", "--format", "json", ...compiler];
 
-  const draft = async (answers: string[]) =>
+  const original = readPolicy(ctrl.covenantPath);
+  const draft = (answers: string[]) =>
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" }, () =>
-      ctrl.cli.json<CompileResult>([...base, "--dry-run", ...answers.flatMap((a) => ["--answer", a])]),
+      ctrl.cli.json<CompileResult>([...base, "--dry-run", ...answers.flatMap((a) => ["--answer", a])], 900_000, 3),
     );
 
-  let result: CompileResult;
-  try {
-    result = await draft([]);
-  } catch (err) {
-    void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
-    return;
-  }
-
+  let result = await draft([]);
   // Ask the clarification questions the compiler found (highest impact first, at most three).
   const answers: string[] = [];
   for (const q of result.questions.slice(0, 3)) {
@@ -344,34 +339,33 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   }
   if (answers.length) result = await draft(answers);
 
-  const errors = result.issues.filter((i) => i.level === "error");
+  if (!ctrl.isOpen) return;
+  const errors = result.issues.filter((issue) => issue.level === "error");
+  const yaml = preservePolicies(result.yaml, original);
   const header = [
-    "# Draft Covenant (not written yet).",
-    ...result.issues.map((i) => `# [${i.level}] ${i.clause}: ${i.message}`),
+    "# Covenant draft for review",
+    ...result.issues.map((issue) => `# [${issue.level}] ${issue.clause}: ${issue.message.replace(/\r?\n/g, "\n# ")}`),
+    "",
     "",
   ].join("\n");
-  const doc = await vscode.workspace.openTextDocument({ language: "yaml", content: header + result.yaml });
+  const doc = await vscode.workspace.openTextDocument({ language: "yaml", content: header + yaml });
   await vscode.window.showTextDocument(doc, { preview: true });
-  if (errors.length) {
-    void vscode.window.showErrorMessage(`The draft has ${errors.length} error(s); see the comments at the top.`);
+  if (errors.length || !result.covenant.clauses.length) {
+    const guidance = errors.length ? "Fix the errors listed in the draft and try again." : "Add a concrete rule and draft again.";
+    void vscode.window.showWarningMessage(`Covenant: ${guidance}`);
     return;
   }
-  const exists = fs.existsSync(ctrl.covenantPath);
   const choice = await vscode.window.showInformationMessage(
-    exists ? "Replace covenant.yaml with this draft?" : "Write this draft to covenant.yaml?",
-    { modal: true },
-    "Write",
+    original === undefined ? "Write the reviewed draft to covenant.yaml?" : "Replace covenant.yaml with the reviewed draft?",
+    { modal: true, detail: ctrl.folder.name },
+    "Write Rules",
   );
-  if (choice !== "Write" || !ctrl.isOpen) return;
-  const code = await ctrl.runLogged("Covenant: writing covenant.yaml…", [
-    "compile", instruction, "--unattended", "--yes", ...compiler,
-    ...answers.flatMap((a) => ["--answer", a]),
-  ]);
-  if (code !== 0) {
-    void vscode.window.showErrorMessage("Covenant couldn't write covenant.yaml; see the Covenant output.");
-    output.show();
-    return;
+  if (choice !== "Write Rules" || !ctrl.isOpen) return;
+  if (vscode.workspace.textDocuments.some((document) => document.uri.fsPath === ctrl.covenantPath && document.isDirty)) {
+    throw new Error("Save or discard the unsaved changes in covenant.yaml before writing a draft.");
   }
+  writeDraft(ctrl.covenantPath, yaml, original);
+  await vscode.window.showTextDocument(vscode.Uri.file(ctrl.covenantPath));
   void vscode.window.showInformationMessage("Covenant rules saved to covenant.yaml.");
 
 }

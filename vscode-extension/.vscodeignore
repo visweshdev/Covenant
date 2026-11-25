@@ -5,5 +5,4 @@ out/test-e2e/**
 test-e2e/**
 **/*.map
 tsconfig.json
-node_modules/**
 .gitignore
