@@ -4,20 +4,16 @@ import * as vscode from "vscode";
 import { CovenantCli, CovenantCliError } from "./cli";
 import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
+import { selectPython, setting } from "./python";
 import { RulesTree } from "./tree";
 import { workspaceRelative } from "./workspace-path";
 import type { CompileResult, Decision, Report, Status } from "./types";
 
 let output: vscode.OutputChannel;
 
-function config<T>(key: string, fallback: T): T {
-  return vscode.workspace.getConfiguration("covenant").get<T>(key, fallback);
-}
-
-function findRepo(): string | undefined {
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const withCovenant = folders.find((f) => fs.existsSync(path.join(f.uri.fsPath, "covenant.yaml")));
-  return (withCovenant ?? folders[0])?.uri.fsPath;
+function findFolder(): vscode.WorkspaceFolder | undefined {
+  const folders = (vscode.workspace.workspaceFolders ?? []).filter((folder) => folder.uri.scheme === "file");
+  return folders.find((folder) => fs.existsSync(path.join(folder.uri.fsPath, "covenant.yaml"))) ?? folders[0];
 }
 
 function fileAccess(repo: string): FileAccess {
@@ -86,12 +82,14 @@ class Controller {
   private stateWatcher?: vscode.FileSystemWatcher;
   private warnedNotInstalled = false;
 
-  constructor(readonly repo: string, readonly context: vscode.ExtensionContext) {
-    this.cli = new CovenantCli(repo, () => config("pythonPath", "python"));
-    this.decorations = new ProtectedFiles(repo, () => this.status);
+  constructor(readonly folder: vscode.WorkspaceFolder, readonly context: vscode.ExtensionContext) {
+    this.cli = new CovenantCli(this.repo, () => setting(folder, "pythonPath", "python"));
+    this.decorations = new ProtectedFiles(this.repo, () => this.status);
     this.statusBar.command = "covenant.rules.focus";
     context.subscriptions.push(this.diagnostics, this.statusBar);
   }
+
+  get repo(): string { return this.folder.uri.fsPath; }
 
   get covenantPath(): string {
     return path.join(this.repo, "covenant.yaml");
@@ -141,8 +139,8 @@ class Controller {
       if (err instanceof CovenantCliError && err.notInstalled && !this.warnedNotInstalled) {
         this.warnedNotInstalled = true;
         void vscode.window
-          .showErrorMessage("Covenant isn't installed for the configured Python.", "Set Python Path")
-          .then((pick) => pick && vscode.commands.executeCommand("workbench.action.openSettings", "covenant.pythonPath"));
+          .showErrorMessage("Covenant isn't installed for the configured Python.", "Select Python")
+          .then((pick) => pick && vscode.commands.executeCommand("covenant.selectPython"));
       }
       output.appendLine(text);
       return;
@@ -244,7 +242,7 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   });
   if (!instruction) return;
   const base = ["compile", instruction, "--unattended", "--format", "json"];
-  if (config("offlineCompile", false)) base.push("--offline");
+  if (setting(ctrl.folder, "offlineCompile", false)) base.push("--offline");
 
   const draft = async (answers: string[]) =>
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" }, () =>
@@ -289,7 +287,7 @@ async function compileCommand(ctrl: Controller): Promise<void> {
   );
   if (choice !== "Write") return;
   const code = await ctrl.runLogged("Covenant: writing covenant.yaml…", [
-    "compile", instruction, "--unattended", "--yes", ...(config("offlineCompile", false) ? ["--offline"] : []),
+    "compile", instruction, "--unattended", "--yes", ...(setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : []),
     ...answers.flatMap((a) => ["--answer", a]),
   ]);
   if (code !== 0) {
@@ -319,7 +317,7 @@ async function amendCommand(ctrl: Controller): Promise<void> {
     ignoreFocusOut: true,
   });
   if (!instruction) return;
-  const base = ["amend", instruction, "--unattended", ...(config("offlineCompile", false) ? ["--offline"] : [])];
+  const base = ["amend", instruction, "--unattended", ...(setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [])];
   const draft = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" },
     () => ctrl.cli.run([...base, "--dry-run"], 900_000),
@@ -354,9 +352,10 @@ export interface CovenantApi {
 export function activate(context: vscode.ExtensionContext): CovenantApi | undefined {
   output = vscode.window.createOutputChannel("Covenant");
   context.subscriptions.push(output);
-  const repo = findRepo();
-  if (!repo) return undefined;
-  const ctrl = new Controller(repo, context);
+  const folder = findFolder();
+  if (!folder) return undefined;
+  const ctrl = new Controller(folder, context);
+  const repo = ctrl.repo;
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("covenant.rules", ctrl.tree),
@@ -366,6 +365,7 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
     vscode.commands.registerCommand("covenant.openViolation", (r: Report) => ctrl.openViolation(r)),
     vscode.commands.registerCommand("covenant.compile", () => compileCommand(ctrl)),
     vscode.commands.registerCommand("covenant.amend", () => amendCommand(ctrl)),
+    vscode.commands.registerCommand("covenant.selectPython", () => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
     vscode.commands.registerCommand("covenant.runTests", async () => {
       const code = await ctrl.runLogged("Covenant: running tests…", ["test"]);
@@ -405,11 +405,11 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
   let timer: NodeJS.Timeout | undefined;
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!config("checkOnSave", true) || doc.uri.scheme !== "file" || !workspaceRelative(repo, doc.uri.fsPath)) return;
+      if (!setting(ctrl.folder, "checkOnSave", true) || doc.uri.scheme !== "file" || !workspaceRelative(repo, doc.uri.fsPath)) return;
       clearTimeout(timer);
       timer = setTimeout(() => void ctrl.refresh(), 1200);
     }),
-    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("covenant") && void ctrl.refresh()),
+    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("covenant", folder.uri) && void ctrl.refresh()),
     { dispose: () => clearTimeout(timer) },
   );
 

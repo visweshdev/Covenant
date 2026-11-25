@@ -90,6 +90,10 @@
       {
         "command": "covenant.openViolation",
         "title": "Covenant: Show Violation"
+      },
+      {
+        "command": "covenant.selectPython",
+        "title": "Covenant: Select Python"
       }
     ],
     "menus": {
@@ -132,17 +136,20 @@
         "covenant.pythonPath": {
           "type": "string",
           "default": "python",
-          "description": "Python that has Covenant installed (runs `python -m covenant`)."
+          "description": "Python that has Covenant installed (runs `python -m covenant`).",
+          "scope": "machine-overridable"
         },
         "covenant.checkOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Re-check the rules when a file is saved. The check never changes files."
+          "description": "Re-check the rules when a file is saved. The check never changes files.",
+          "scope": "resource"
         },
         "covenant.offlineCompile": {
           "type": "boolean",
           "default": false,
-          "description": "Compile instructions with the offline extractor instead of Claude."
+          "description": "Compile instructions with the offline extractor instead of Claude.",
+          "scope": "resource"
         }
       }
     }
