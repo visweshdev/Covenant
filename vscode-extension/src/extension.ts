@@ -5,6 +5,7 @@ import { CovenantCli, CovenantCliError } from "./cli";
 import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
 import { RulesTree } from "./tree";
+import { workspaceRelative } from "./workspace-path";
 import type { CompileResult, Decision, Report, Status } from "./types";
 
 let output: vscode.OutputChannel;
@@ -19,13 +20,10 @@ function findRepo(): string | undefined {
   return (withCovenant ?? folders[0])?.uri.fsPath;
 }
 
-function rel(repo: string, file: string): string {
-  return path.relative(repo, file).split(path.sep).join("/");
-}
-
 function fileAccess(repo: string): FileAccess {
   return {
     read(r) {
+      if (workspaceRelative(repo, path.resolve(repo, r)) === undefined) return undefined;
       try {
         return fs.readFileSync(path.join(repo, r), "utf8");
       } catch {
@@ -33,6 +31,7 @@ function fileAccess(repo: string): FileAccess {
       }
     },
     list(dir, ext) {
+      if (workspaceRelative(repo, path.resolve(repo, dir)) === undefined) return [];
       const out: string[] = [];
       const walk = (d: string, depth: number) => {
         let entries: fs.Dirent[] = [];
@@ -65,8 +64,8 @@ class ProtectedFiles implements vscode.FileDecorationProvider {
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     const status = this.status();
     if (!status || uri.scheme !== "file") return undefined;
-    const r = rel(this.repo, uri.fsPath);
-    if (r.startsWith("..")) return undefined;
+    const r = workspaceRelative(this.repo, uri.fsPath);
+    if (!r) return undefined;
     const clause = protectingClause(r, status.protected);
     if (!clause) return undefined;
     const span = status.clauses.find((c) => c.id === clause)?.source_span ?? "";
@@ -157,7 +156,7 @@ class Controller {
     const files = fileAccess(this.repo);
     const byFile = new Map<string, vscode.Diagnostic[]>();
     for (const report of reports) {
-      const place = locate(report, files, "covenant.yaml");
+      const place = this.reportLocation(report, files);
       const severity = isReminder(report) ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
       const diag = new vscode.Diagnostic(new vscode.Range(place.line, 0, place.line, 1000), message(report), severity);
       diag.source = "Covenant";
@@ -208,8 +207,14 @@ class Controller {
     await vscode.window.showTextDocument(doc, { selection: new vscode.Range(line, 0, line, 0) });
   }
 
+  private reportLocation(report: Report, files: FileAccess) {
+    const place = locate(report, files, "covenant.yaml");
+    if (workspaceRelative(this.repo, path.resolve(this.repo, place.file))) return place;
+    return { file: "covenant.yaml", line: clauseLine(files.read("covenant.yaml") ?? "", report.violation) };
+  }
+
   async openViolation(report: Report): Promise<void> {
-    const place = locate(report, fileAccess(this.repo), "covenant.yaml");
+    const place = this.reportLocation(report, fileAccess(this.repo));
     const uri = vscode.Uri.file(path.join(this.repo, place.file));
     if (!fs.existsSync(uri.fsPath)) {
       void vscode.window.showInformationMessage(message(report));
@@ -400,7 +405,7 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
   let timer: NodeJS.Timeout | undefined;
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!config("checkOnSave", true) || !doc.uri.fsPath.startsWith(repo)) return;
+      if (!config("checkOnSave", true) || doc.uri.scheme !== "file" || !workspaceRelative(repo, doc.uri.fsPath)) return;
       clearTimeout(timer);
       timer = setTimeout(() => void ctrl.refresh(), 1200);
     }),
