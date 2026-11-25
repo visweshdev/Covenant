@@ -85,6 +85,7 @@ class Controller implements vscode.Disposable {
   private warnedNotInstalled = false;
   private readonly resources: vscode.Disposable[] = [];
   private disposed = false;
+  private activeAction?: string;
 
   constructor(readonly folder: vscode.WorkspaceFolder, readonly tree: RulesTree) {
     this.cli = new CovenantCli(this.repo, () => setting(folder, "pythonPath", "python"));
@@ -115,6 +116,31 @@ class Controller implements vscode.Disposable {
     this.disposed = true;
     this.stateWatcher?.dispose();
     for (const resource of this.resources) resource.dispose();
+  }
+
+  get isOpen(): boolean { return !this.disposed; }
+
+  async act(label: string, action: () => Promise<void>): Promise<void> {
+    if (this.activeAction) {
+      void vscode.window.showInformationMessage(`Covenant is already running “${this.activeAction}”.`);
+      return;
+    }
+    this.activeAction = label;
+    try {
+      await action();
+    } catch (error) {
+      output.appendLine(error instanceof Error ? error.message : String(error));
+      void this.failure(`${label} failed.`);
+    } finally {
+      this.activeAction = undefined;
+      await this.refresh();
+    }
+  }
+
+  async failure(message: string): Promise<void> {
+    if (!this.isOpen) return;
+    const choice = await vscode.window.showErrorMessage(`Covenant: ${message}`, "Show Output");
+    if (choice === "Show Output") output.show();
   }
 
   get repo(): string { return this.folder.uri.fsPath; }
@@ -275,7 +301,7 @@ class Controller implements vscode.Disposable {
 
   async runLogged(title: string, args: string[]): Promise<number> {
     return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, async () => {
-      output.appendLine(`\n$ covenant ${args.join(" ")}`);
+      output.appendLine(`\n${this.folder.name}: covenant ${args[0]}`);
       const result = await this.cli.run(args, 900_000);
       output.append(result.stderr);
       output.append(result.stdout);
@@ -291,9 +317,9 @@ async function compileCommand(ctrl: Controller): Promise<void> {
     placeHolder: "Update dependencies, but don't change public APIs, don't delete user data, and run tests before committing.",
     ignoreFocusOut: true,
   });
-  if (!instruction) return;
-  const base = ["compile", instruction, "--unattended", "--format", "json"];
-  if (setting(ctrl.folder, "offlineCompile", false)) base.push("--offline");
+  if (!instruction || !ctrl.isOpen) return;
+  const compiler = setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [];
+  const base = ["compile", instruction, "--unattended", "--format", "json", ...compiler];
 
   const draft = async (answers: string[]) =>
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" }, () =>
@@ -336,9 +362,9 @@ async function compileCommand(ctrl: Controller): Promise<void> {
     { modal: true },
     "Write",
   );
-  if (choice !== "Write") return;
+  if (choice !== "Write" || !ctrl.isOpen) return;
   const code = await ctrl.runLogged("Covenant: writing covenant.yaml…", [
-    "compile", instruction, "--unattended", "--yes", ...(setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : []),
+    "compile", instruction, "--unattended", "--yes", ...compiler,
     ...answers.flatMap((a) => ["--answer", a]),
   ]);
   if (code !== 0) {
@@ -346,19 +372,13 @@ async function compileCommand(ctrl: Controller): Promise<void> {
     output.show();
     return;
   }
-  const next = await vscode.window.showInformationMessage(
-    "covenant.yaml written. Install the git and Claude Code hooks and start enforcing?",
-    "Set Up",
-  );
-  if (next === "Set Up") await vscode.commands.executeCommand("covenant.init");
-  await ctrl.refresh();
+  void vscode.window.showInformationMessage("Covenant rules saved to covenant.yaml.");
+
 }
 
 async function amendCommand(ctrl: Controller): Promise<void> {
   if (!fs.existsSync(ctrl.covenantPath)) {
-    void vscode.window.showWarningMessage("There's no covenant.yaml yet; compile one first.", "Compile").then(
-      (c) => c && vscode.commands.executeCommand("covenant.compile"),
-    );
+    void vscode.window.showWarningMessage("Create covenant.yaml before adding a rule.");
     return;
   }
   const instruction = await vscode.window.showInputBox({
@@ -367,7 +387,7 @@ async function amendCommand(ctrl: Controller): Promise<void> {
     placeHolder: "Also don't touch config/",
     ignoreFocusOut: true,
   });
-  if (!instruction) return;
+  if (!instruction || !ctrl.isOpen) return;
   const base = ["amend", instruction, "--unattended", ...(setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [])];
   const draft = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" },
@@ -385,7 +405,7 @@ async function amendCommand(ctrl: Controller): Promise<void> {
     { modal: true, detail: rules },
     "Add",
   );
-  if (choice !== "Add") return;
+  if (choice !== "Add" || !ctrl.isOpen) return;
   const code = await ctrl.runLogged("Covenant: adding rules…", [...base, "--yes"]);
   if (code !== 0) {
     void vscode.window.showErrorMessage("Covenant couldn't add the rules; see the Covenant output.");
@@ -439,37 +459,34 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     register("covenant.refresh", (ctrl) => ctrl.refresh()),
     register("covenant.openRule", (ctrl, id: string) => ctrl.openRule(id)),
     register("covenant.openViolation", (ctrl, report: Report) => ctrl.openViolation(report)),
-    register("covenant.compile", (ctrl) => compileCommand(ctrl)),
-    register("covenant.amend", (ctrl) => amendCommand(ctrl)),
+    register("covenant.compile", (ctrl) => ctrl.act("Draft rules", () => compileCommand(ctrl))),
+    register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
     register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
-    register("covenant.runTests", async (ctrl) => {
+    register("covenant.runTests", (ctrl) => ctrl.act("Run tests", async () => {
       const code = await ctrl.runLogged("Covenant: running tests…", ["test"]);
-      void (code === 0
-        ? vscode.window.showInformationMessage("Tests passed and were recorded; a commit can follow.")
-        : vscode.window.showWarningMessage("Tests failed or a rule was reported; see the Covenant output.", "Show").then((p) => p && output.show()));
-      await ctrl.refresh();
-    }),
-    register("covenant.approve", async (ctrl) => {
+      if (code === 0) {
+        void vscode.window.showInformationMessage("Covenant recorded a passing test run. Use Check Now to review the remaining rules.");
+      } else {
+        void ctrl.failure("The test run did not complete successfully.");
+      }
+    })),
+    register("covenant.approve", (ctrl) => ctrl.act("Start task", async () => {
       const choice = await vscode.window.showWarningMessage(
         "Approve covenant.yaml as it is now and start a new task?",
         { modal: true, detail: "This pins the current rules and baseline commit, snapshots protected data, and clears this task's event history." },
         "Approve",
       );
-      if (choice !== "Approve") return;
-      await ctrl.runLogged("Covenant: approving…", ["start"]);
-      await ctrl.refresh();
-    }),
-    register("covenant.init", async (ctrl) => {
+      if (choice !== "Approve" || !ctrl.isOpen) return;
+      const code = await ctrl.runLogged("Covenant: approving…", ["start"]);
+      if (code === 0) void vscode.window.showInformationMessage("Covenant task started.");
+      else void ctrl.failure("The task could not start.");
+    })),
+    register("covenant.init", (ctrl) => ctrl.act("Set up repository", async () => {
       const code = await ctrl.runLogged("Covenant: setting up hooks…", ["init"]);
-      if (code !== 0) {
-        void vscode.window.showErrorMessage("Covenant setup failed; see the Covenant output.");
-        output.show();
-      } else {
-        void vscode.window.showInformationMessage("Covenant is enforcing this repo: git hooks and Claude Code hooks installed.");
-      }
-      await ctrl.refresh();
-    }),
+      if (code !== 0) void ctrl.failure("Repository setup failed.");
+      else void vscode.window.showInformationMessage("Covenant task started. See the output for hook setup details.");
+    })),
   );
 
   rebind();
