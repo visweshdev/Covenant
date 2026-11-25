@@ -57,6 +57,8 @@ class ProtectedFiles implements vscode.FileDecorationProvider {
     this.changed.fire(undefined);
   }
 
+  dispose(): void { this.changed.dispose(); }
+
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     const status = this.status();
     if (!status || uri.scheme !== "file") return undefined;
@@ -69,9 +71,8 @@ class ProtectedFiles implements vscode.FileDecorationProvider {
   }
 }
 
-class Controller {
+class Controller implements vscode.Disposable {
   readonly cli: CovenantCli;
-  readonly tree = new RulesTree();
   readonly diagnostics = vscode.languages.createDiagnosticCollection("covenant");
   readonly statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   readonly decorations: ProtectedFiles;
@@ -81,12 +82,38 @@ class Controller {
   private again = false;
   private stateWatcher?: vscode.FileSystemWatcher;
   private warnedNotInstalled = false;
+  private readonly resources: vscode.Disposable[] = [];
+  private disposed = false;
 
-  constructor(readonly folder: vscode.WorkspaceFolder, readonly context: vscode.ExtensionContext) {
+  constructor(readonly folder: vscode.WorkspaceFolder, readonly tree: RulesTree) {
     this.cli = new CovenantCli(this.repo, () => setting(folder, "pythonPath", "python"));
     this.decorations = new ProtectedFiles(this.repo, () => this.status);
     this.statusBar.command = "covenant.rules.focus";
-    context.subscriptions.push(this.diagnostics, this.statusBar);
+    const covenantWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "covenant.yaml"));
+    const check = () => void this.refresh();
+    covenantWatcher.onDidChange(check);
+    covenantWatcher.onDidCreate(check);
+    covenantWatcher.onDidDelete(check);
+    let timer: NodeJS.Timeout | undefined;
+    this.resources.push(
+      this.diagnostics, this.statusBar, this.decorations, covenantWatcher,
+      vscode.window.registerFileDecorationProvider(this.decorations),
+      vscode.workspace.onDidSaveTextDocument((doc) => {
+        if (!setting(folder, "checkOnSave", true) || doc.uri.scheme !== "file" || !workspaceRelative(this.repo, doc.uri.fsPath)) return;
+        clearTimeout(timer);
+        timer = setTimeout(check, 1200);
+      }),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("covenant", folder.uri)) check();
+      }),
+      { dispose: () => clearTimeout(timer) },
+    );
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stateWatcher?.dispose();
+    for (const resource of this.resources) resource.dispose();
   }
 
   get repo(): string { return this.folder.uri.fsPath; }
@@ -97,6 +124,7 @@ class Controller {
 
   /** Re-check; calls made while a check is running coalesce into one more run. */
   refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     if (this.running) {
       this.again = true;
       return this.running;
@@ -126,11 +154,16 @@ class Controller {
     }
     this.statusBar.command = "covenant.rules.focus";
     try {
-      this.status = await this.cli.json<Status>(["status", "--format", "json"]);
-      this.preview = this.status.has_session ? await this.cli.json<Decision>(["check", "--preview"]) : undefined;
+      const status = await this.cli.json<Status>(["status", "--format", "json"]);
+      if (this.disposed) return;
+      const preview = status.has_session ? await this.cli.json<Decision>(["check", "--preview"]) : undefined;
+      if (this.disposed) return;
+      this.status = status;
+      this.preview = preview;
       this.tree.update(this.status, this.preview);
       this.watchState(this.status.state_dir);
     } catch (err) {
+      if (this.disposed) return;
       const text = err instanceof Error ? err.message : String(err);
       this.tree.update(undefined, undefined, text);
       this.statusBar.text = "$(error) Covenant: error";
@@ -196,7 +229,7 @@ class Controller {
     const onChange = () => void this.refresh();
     this.stateWatcher.onDidChange(onChange);
     this.stateWatcher.onDidCreate(onChange);
-    this.context.subscriptions.push(this.stateWatcher);
+
   }
 
   async openRule(id: string): Promise<void> {
@@ -349,32 +382,57 @@ export interface CovenantApi {
   state(): { status?: Status; preview?: Decision; statusBar: string; protectedBy(relPath: string): string | undefined };
 }
 
-export function activate(context: vscode.ExtensionContext): CovenantApi | undefined {
+export function activate(context: vscode.ExtensionContext): CovenantApi {
   output = vscode.window.createOutputChannel("Covenant");
-  context.subscriptions.push(output);
-  const folder = findFolder();
-  if (!folder) return undefined;
-  const ctrl = new Controller(folder, context);
-  const repo = ctrl.repo;
+  const tree = new RulesTree();
+  let controller: Controller | undefined;
+  const rebind = () => {
+    const folder = vscode.workspace.isTrusted ? findFolder() : undefined;
+    if (folder && folder.uri.toString() === controller?.folder.uri.toString()) return;
+    controller?.dispose();
+    controller = undefined;
+    if (!folder) {
+      void vscode.commands.executeCommand("setContext", "covenant.hasCovenant", false);
+      tree.update(undefined, undefined, vscode.workspace.isTrusted
+        ? "Open a local repository folder to use Covenant."
+        : "Trust this workspace to run Covenant.");
+      return;
+    }
+    tree.update(undefined, undefined);
+    controller = new Controller(folder, tree);
+    void controller.refresh();
+  };
+
+  function register<A extends unknown[]>(id: string, run: (ctrl: Controller, ...args: A) => unknown): vscode.Disposable {
+    return vscode.commands.registerCommand(id, (...args: A) => {
+      if (controller) return run(controller, ...args);
+      return vscode.window.showInformationMessage(vscode.workspace.isTrusted
+        ? "Open a local repository folder to use Covenant."
+        : "Trust this workspace to run Covenant.");
+    });
+  }
 
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider("covenant.rules", ctrl.tree),
-    vscode.window.registerFileDecorationProvider(ctrl.decorations),
-    vscode.commands.registerCommand("covenant.refresh", () => ctrl.refresh()),
-    vscode.commands.registerCommand("covenant.openRule", (id: string) => ctrl.openRule(id)),
-    vscode.commands.registerCommand("covenant.openViolation", (r: Report) => ctrl.openViolation(r)),
-    vscode.commands.registerCommand("covenant.compile", () => compileCommand(ctrl)),
-    vscode.commands.registerCommand("covenant.amend", () => amendCommand(ctrl)),
-    vscode.commands.registerCommand("covenant.selectPython", () => selectPython(ctrl.folder)),
+    output, tree,
+    { dispose: () => controller?.dispose() },
+    vscode.workspace.onDidChangeWorkspaceFolders(rebind),
+    vscode.workspace.onDidGrantWorkspaceTrust(rebind),
+    vscode.window.registerTreeDataProvider("covenant.rules", tree),
+    register("covenant.refresh", (ctrl) => ctrl.refresh()),
+    register("covenant.openRule", (ctrl, id: string) => ctrl.openRule(id)),
+    register("covenant.openViolation", (ctrl, report: Report) => ctrl.openViolation(report)),
+    register("covenant.compile", (ctrl) => compileCommand(ctrl)),
+    register("covenant.amend", (ctrl) => amendCommand(ctrl)),
+    register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
-    vscode.commands.registerCommand("covenant.runTests", async () => {
+    register("covenant.runTests", async (ctrl) => {
       const code = await ctrl.runLogged("Covenant: running tests…", ["test"]);
       void (code === 0
         ? vscode.window.showInformationMessage("Tests passed and were recorded; a commit can follow.")
         : vscode.window.showWarningMessage("Tests failed or a rule was reported; see the Covenant output.", "Show").then((p) => p && output.show()));
       await ctrl.refresh();
     }),
-    vscode.commands.registerCommand("covenant.approve", async () => {
+    register("covenant.approve", async (ctrl) => {
       const choice = await vscode.window.showWarningMessage(
         "Approve covenant.yaml as it is now and start a new task?",
         { modal: true, detail: "This pins the current rules and baseline commit, snapshots protected data, and clears this task's event history." },
@@ -384,7 +442,7 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
       await ctrl.runLogged("Covenant: approving…", ["start"]);
       await ctrl.refresh();
     }),
-    vscode.commands.registerCommand("covenant.init", async () => {
+    register("covenant.init", async (ctrl) => {
       const code = await ctrl.runLogged("Covenant: setting up hooks…", ["init"]);
       if (code !== 0) {
         void vscode.window.showErrorMessage("Covenant setup failed; see the Covenant output.");
@@ -396,31 +454,14 @@ export function activate(context: vscode.ExtensionContext): CovenantApi | undefi
     }),
   );
 
-  const covenantWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(repo, "covenant.yaml"));
-  covenantWatcher.onDidChange(() => void ctrl.refresh());
-  covenantWatcher.onDidCreate(() => void ctrl.refresh());
-  covenantWatcher.onDidDelete(() => void ctrl.refresh());
-  context.subscriptions.push(covenantWatcher);
-
-  let timer: NodeJS.Timeout | undefined;
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!setting(ctrl.folder, "checkOnSave", true) || doc.uri.scheme !== "file" || !workspaceRelative(repo, doc.uri.fsPath)) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => void ctrl.refresh(), 1200);
-    }),
-    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("covenant", folder.uri) && void ctrl.refresh()),
-    { dispose: () => clearTimeout(timer) },
-  );
-
-  void ctrl.refresh();
+  rebind();
   return {
-    refresh: () => ctrl.refresh(),
+    refresh: () => controller?.refresh() ?? Promise.resolve(),
     state: () => ({
-      status: ctrl.status,
-      preview: ctrl.preview,
-      statusBar: ctrl.statusBar.text,
-      protectedBy: (relPath: string) => (ctrl.status ? protectingClause(relPath, ctrl.status.protected) : undefined),
+      status: controller?.status,
+      preview: controller?.preview,
+      statusBar: controller?.statusBar.text ?? "",
+      protectedBy: (relPath: string) => controller?.status && protectingClause(relPath, controller.status.protected),
     }),
   };
 }

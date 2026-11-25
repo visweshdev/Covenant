@@ -179,5 +179,18 @@
   "galleryBanner": {
     "color": "#f4efe6",
     "theme": "light"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Covenant can show setup guidance in Restricted Mode. Running Python, tests, or hooks requires workspace trust.",
+      "restrictedConfigurations": [
+        "covenant.pythonPath"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Covenant requires a repository on the extension host filesystem."
+    }
   }
 }

@@ -11,12 +11,14 @@ type Node =
   | { kind: "recent" }
   | { kind: "logged"; entry: LoggedDecision };
 
-export class RulesTree implements vscode.TreeDataProvider<Node> {
+export class RulesTree implements vscode.TreeDataProvider<Node>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   status?: Status;
   preview?: Decision;
   error?: string;
+
+  dispose(): void { this.changed.dispose(); }
 
   update(status: Status | undefined, preview: Decision | undefined, error?: string): void {
     this.status = status;
