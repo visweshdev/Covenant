@@ -4,6 +4,7 @@ export interface CliResult {
   code: number;
   stdout: string;
   stderr: string;
+  missingExecutable?: boolean;
 }
 
 export class CovenantCli {
@@ -20,7 +21,12 @@ export class CovenantCli {
         { cwd: this.repo, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
         (error, stdout, stderr) => {
           const code = error ? (typeof error.code === "number" ? error.code : -1) : 0;
-          resolve({ code, stdout: String(stdout), stderr: String(stderr || (error && code === -1 ? error.message : "")) });
+          resolve({
+            code,
+            stdout: String(stdout),
+            stderr: String(stderr || (error && code === -1 ? error.message : "")),
+            missingExecutable: error?.code === "ENOENT",
+          });
         },
       );
     });
@@ -50,6 +56,6 @@ export class CovenantCliError extends Error {
   }
 
   get notInstalled(): boolean {
-    return this.result.code === -1 || /No module named covenant|ENOENT|not recognized/i.test(this.result.stderr);
+    return Boolean(this.result.missingExecutable) || /No module named covenant(?:\s|$)/i.test(this.result.stderr);
   }
 }

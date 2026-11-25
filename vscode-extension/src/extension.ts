@@ -81,6 +81,7 @@ class Controller implements vscode.Disposable {
   private running?: Promise<void>;
   private again = false;
   private stateWatcher?: vscode.FileSystemWatcher;
+  private watchedStateDir?: string;
   private warnedNotInstalled = false;
   private readonly resources: vscode.Disposable[] = [];
   private disposed = false;
@@ -129,23 +130,30 @@ class Controller implements vscode.Disposable {
       this.again = true;
       return this.running;
     }
-    this.running = this.doRefresh().finally(() => {
-      this.running = undefined;
-      if (this.again) {
-        this.again = false;
-        void this.refresh();
-      }
-    });
+    this.running = this.drainRefreshes().finally(() => { this.running = undefined; });
     return this.running;
+  }
+
+  private async drainRefreshes(): Promise<void> {
+    do {
+      this.again = false;
+      await this.doRefresh();
+    } while (this.again && !this.disposed);
+  }
+
+  private clearPreview(): void {
+    this.status = this.preview = undefined;
+    this.diagnostics.clear();
+    this.decorations.refresh();
   }
 
   private async doRefresh(): Promise<void> {
     const hasCovenant = fs.existsSync(this.covenantPath);
     void vscode.commands.executeCommand("setContext", "covenant.hasCovenant", hasCovenant);
     if (!hasCovenant) {
-      this.status = this.preview = undefined;
+      this.clearPreview();
+      this.watchState(undefined);
       this.tree.update(undefined, undefined);
-      this.diagnostics.clear();
       this.statusBar.text = "$(shield) Covenant: set up";
       this.statusBar.tooltip = "No covenant.yaml. Click to compile rules from an instruction.";
       this.statusBar.command = "covenant.compile";
@@ -158,13 +166,19 @@ class Controller implements vscode.Disposable {
       if (this.disposed) return;
       const preview = status.has_session ? await this.cli.json<Decision>(["check", "--preview"]) : undefined;
       if (this.disposed) return;
+      if (!fs.existsSync(this.covenantPath)) {
+        this.again = true;
+        return;
+      }
       this.status = status;
       this.preview = preview;
+      this.warnedNotInstalled = false;
       this.tree.update(this.status, this.preview);
       this.watchState(this.status.state_dir);
     } catch (err) {
       if (this.disposed) return;
       const text = err instanceof Error ? err.message : String(err);
+      this.clearPreview();
       this.tree.update(undefined, undefined, text);
       this.statusBar.text = "$(error) Covenant: error";
       this.statusBar.tooltip = text;
@@ -222,14 +236,18 @@ class Controller implements vscode.Disposable {
     this.statusBar.show();
   }
 
-  private watchState(stateDir: string): void {
-    if (this.stateWatcher) return;
+  private watchState(stateDir: string | undefined): void {
+    if (this.watchedStateDir === stateDir) return;
+    this.stateWatcher?.dispose();
+    this.stateWatcher = undefined;
+    this.watchedStateDir = stateDir;
+    if (!stateDir) return;
     const pattern = new vscode.RelativePattern(vscode.Uri.file(stateDir), "*.{jsonl,json}");
     this.stateWatcher = vscode.workspace.createFileSystemWatcher(pattern);
     const onChange = () => void this.refresh();
     this.stateWatcher.onDidChange(onChange);
     this.stateWatcher.onDidCreate(onChange);
-
+    this.stateWatcher.onDidDelete(onChange);
   }
 
   async openRule(id: string): Promise<void> {
