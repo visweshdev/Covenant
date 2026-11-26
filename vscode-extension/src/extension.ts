@@ -130,6 +130,7 @@ class Controller implements vscode.Disposable {
       return;
     }
     this.activeAction = label;
+    this.publish();
     try {
       await action();
     } catch (error) {
@@ -137,6 +138,7 @@ class Controller implements vscode.Disposable {
       void this.failure(`${label} failed.`);
     } finally {
       this.activeAction = undefined;
+      if (this.isOpen) this.publish();
       await this.refresh();
     }
   }
@@ -180,7 +182,7 @@ class Controller implements vscode.Disposable {
   publish(): void {
     this.sidebar.update({
       folder: this.folder.name, policy: fs.existsSync(this.covenantPath), status: this.status,
-      preview: this.preview, error: this.error, missingPython: this.missingPython,
+      preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction,
     });
   }
 
@@ -198,6 +200,15 @@ class Controller implements vscode.Disposable {
       this.statusBar.tooltip = "No covenant.yaml. Click to compile rules from an instruction.";
       this.statusBar.command = "covenant.overview.focus";
       this.statusBar.show();
+      const attempt = await this.cli.run(["--version"], 10_000);
+      if (!this.isOpen || fs.existsSync(this.covenantPath)) return;
+      if (attempt.code) {
+        const error = new CovenantCliError("version", attempt);
+        this.missingPython = error.notInstalled;
+        this.error = error.message;
+        output.appendLine(error.message);
+        this.publish();
+      }
       return;
     }
     this.statusBar.command = "covenant.overview.focus";
@@ -474,12 +485,17 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     vscode.window.registerTreeDataProvider("covenant.rules", tree),
     vscode.window.registerWebviewViewProvider("covenant.overview", sidebar),
     register("covenant.refresh", (ctrl) => ctrl.refresh()),
+    register("covenant.openPolicy", (ctrl) => vscode.window.showTextDocument(vscode.Uri.file(ctrl.covenantPath))),
     register("covenant.openRule", (ctrl, id: string) => ctrl.openRule(id)),
     register("covenant.openViolation", (ctrl, report: Report) => ctrl.openViolation(report)),
     register("covenant.compile", (ctrl) => ctrl.act("Draft rules", () => compileCommand(ctrl))),
     register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
     register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
+    vscode.commands.registerCommand("covenant.copyInstall", async () => {
+      await vscode.env.clipboard.writeText("python -m pip install covenant-agents");
+      void vscode.window.showInformationMessage("Covenant install command copied.");
+    }),
     register("covenant.runTests", (ctrl) => ctrl.act("Run tests", async () => {
       const code = await ctrl.runLogged("Covenant: running tests…", ["test"]);
       if (code === 0) {

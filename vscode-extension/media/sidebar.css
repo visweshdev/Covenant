@@ -16,7 +16,7 @@ body {
 
 p, h1 { margin: 0; }
 h1 { font-size: 1.35em; line-height: 1.22; font-weight: 650; }
-.muted { color: var(--vscode-descriptionForeground, inherit); }
+.muted { color: var(--vscode-descriptionForeground, var(--vscode-foreground)); }
 .workspace { margin-bottom: 10px; font-weight: 600; }
 
 .status-card {
@@ -54,3 +54,7 @@ button:hover { background: var(--vscode-button-hoverBackground); }
 button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
 button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+.progress { margin-bottom: 8px; color: var(--vscode-descriptionForeground); }
+button:disabled { cursor: default; opacity: 0.62; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

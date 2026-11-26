@@ -7,6 +7,7 @@ export interface SidebarState {
   restricted?: boolean;
   error?: string;
   missingPython?: boolean;
+  busy?: string;
   status?: Status;
   preview?: Decision;
 }
@@ -19,6 +20,8 @@ const commands = new Map([
   ["openFolder", "workbench.action.files.openFolder"],
   ["trust", "workbench.trust.manage"],
   ["python", "covenant.selectPython"],
+  ["openPolicy", "covenant.openPolicy"],
+  ["copyInstall", "covenant.copyInstall"],
   ["output", "covenant.showLog"],
 ]);
 

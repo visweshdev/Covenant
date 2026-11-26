@@ -100,6 +100,10 @@
       {
         "command": "covenant.selectPython",
         "title": "Covenant: Select Python"
+      },
+      {
+        "command": "covenant.openPolicy",
+        "title": "Covenant: Open Rules File"
       }
     ],
     "menus": {
