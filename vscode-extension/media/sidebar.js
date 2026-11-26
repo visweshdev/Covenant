@@ -1,6 +1,7 @@
 (() => {
   const vscode = acquireVsCodeApi();
   const panel = document.getElementById("panel");
+  let revision;
 
   function element(tag, className, ...children) {
     const node = document.createElement(tag);
@@ -9,10 +10,11 @@
     return node;
   }
 
-  function button(label, action, primary = false) {
+  function button(label, action, primary = false, value) {
     const node = element("button", primary ? "primary" : "secondary", label);
     node.type = "button";
     node.dataset.action = action;
+    if (value !== undefined) node.dataset.value = value;
     return node;
   }
 
@@ -62,29 +64,61 @@
         "The approved rules still apply. Review covenant.yaml before starting a new task.",
         button("Open YAML", "openPolicy", true), button("Start New Task", "approve"));
     }
-    return statusCard("good", "Task active", "Workspace checks",
-      "Check the current working tree against your approved rules.", button("Check Now", "refresh", true));
+    const issues = state.reports.filter((report) => !report.reminder);
+    const reminders = state.reports.filter((report) => report.reminder);
+    const actions = [button("Check Now", "refresh", true)];
+    if (state.status.testCount) actions.push(button("Run Tests", "test"));
+    const card = issues.length
+      ? statusCard("bad", "Review current changes", `${issues.length} ${issues.length === 1 ? "issue" : "issues"} to review`,
+        "Open a finding to jump to the relevant file or rule.", ...actions)
+      : reminders.length
+        ? statusCard("warning", "Before your next commit", "Follow-up needed",
+          "Review the remaining requirements below.", ...actions)
+        : statusCard("good", "Task active", "All current checks pass",
+          "Your working tree was checked against the approved rules.", ...actions);
+    return card;
+  }
+
+  function findings(title, reports) {
+    const heading = element("h2", "", title);
+    const rows = reports.map((report) => {
+      const row = button(report.text, "report", false, report.index);
+      row.classList.add("row-button");
+      return element("li", "", row);
+    });
+    return element("section", "section", heading, element("ul", "rows", ...rows));
+  }
+
+  function overviewContents(state) {
+    const issues = state.reports.filter((report) => !report.reminder);
+    const reminders = state.reports.filter((report) => report.reminder);
+    const contents = [overview(state)];
+    if (issues.length) contents.push(findings("Issues", issues));
+    if (reminders.length) contents.push(findings("Reminders", reminders));
+    return element("div", "stack", ...contents);
   }
 
   panel.addEventListener("click", (event) => {
     const target = event.target.closest("button[data-action]");
-    if (target) vscode.postMessage({ action: target.dataset.action });
+    if (target) vscode.postMessage({ action: target.dataset.action, value: target.dataset.value, revision });
   });
   window.addEventListener("message", ({ data }) => {
     if (data?.type !== "state") return;
     const { state } = data;
+    revision = data.revision;
     const folder = state.folder ? element("p", "workspace", state.folder) : document.createTextNode("");
-    const focus = document.activeElement?.dataset.action;
-    const contents = overview(state);
+    const focus = document.activeElement?.dataset;
+    const contents = overviewContents(state);
     if (state.busy) {
       for (const control of contents.querySelectorAll("button[data-action]")) {
-        if (["compile", "approve", "init", "python"].includes(control.dataset.action)) control.disabled = true;
+        if (["compile", "approve", "init", "python", "test"].includes(control.dataset.action)) control.disabled = true;
       }
     }
     const progress = element("p", state.busy ? "progress" : "visually-hidden", state.busy ? `${state.busy} in progress…` : "");
     progress.setAttribute("role", "status");
     panel.replaceChildren(folder, progress, contents);
-    if (focus) [...panel.querySelectorAll("button[data-action]")].find((control) => control.dataset.action === focus)?.focus();
+    if (focus?.action) [...panel.querySelectorAll("button[data-action]")]
+      .find((control) => control.dataset.action === focus.action && control.dataset.value === focus.value)?.focus();
   });
   vscode.postMessage({ action: "ready" });
 })();

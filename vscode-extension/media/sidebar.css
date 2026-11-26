@@ -58,3 +58,21 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 1px 
 .progress { margin-bottom: 8px; color: var(--vscode-descriptionForeground); }
 button:disabled { cursor: default; opacity: 0.62; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.status-card.bad { --tone: var(--vscode-problemsErrorIcon-foreground); }
+.stack { display: grid; gap: 16px; }
+.section h2 { margin: 0 0 7px; font-size: 1.08em; font-weight: 650; }
+.rows { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--vscode-widget-border, var(--vscode-sideBarSectionHeader-border, transparent)); }
+.rows li { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-sideBarSectionHeader-border, transparent)); }
+button.row-button {
+  width: 100%;
+  text-align: start;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  border-color: transparent;
+  border-radius: 0;
+  padding: 8px 4px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+button.row-button:hover { background: var(--vscode-list-hoverBackground); }
