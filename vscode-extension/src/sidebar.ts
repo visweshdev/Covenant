@@ -21,6 +21,7 @@ const commands = new Map([
   ["openFolder", "workbench.action.files.openFolder"],
   ["trust", "workbench.trust.manage"],
   ["python", "covenant.selectPython"],
+  ["amend", "covenant.amend"],
   ["test", "covenant.runTests"],
   ["openPolicy", "covenant.openPolicy"],
   ["copyInstall", "covenant.copyInstall"],
@@ -50,6 +51,10 @@ export class Sidebar implements vscode.WebviewViewProvider {
           has_session: status.has_session,
           repo_covenant_changed: status.repo_covenant_changed,
           testCount: status.test_commands.length,
+          rules: status.clauses.map(({ id, source_span, status: ruleStatus, checker, on_violation, scope, assumptions, origin }) => ({
+            id, text: source_span, status: ruleStatus ?? "enforced", checker,
+            response: on_violation, scope, assumptions, origin, blocks: status.block_counts[id] ?? 0,
+          })),
         },
         reports: (preview?.reports ?? []).map((report, index) => ({
           index, id: report.violation, text: reportMessage(report), reminder: isReminder(report),
@@ -66,6 +71,9 @@ export class Sidebar implements vscode.WebviewViewProvider {
     const messages = webview.onDidReceiveMessage(async (message: { action?: unknown; value?: unknown; revision?: unknown }) => {
       if (message?.action === "ready") {
         await this.send(webview);
+      } else if (message?.action === "rule" && this.revision === message.revision) {
+        const rule = this.state.status?.clauses.find((clause) => clause.id === message.value);
+        if (rule && !rule.origin) await vscode.commands.executeCommand("covenant.openRule", rule.id);
       } else if (message?.action === "report" && this.revision === message.revision && typeof message.value === "string") {
         const index = Number(message.value);
         const report = Number.isInteger(index) ? this.state.preview?.reports[index] : undefined;

@@ -4,6 +4,7 @@ export interface Clause {
   id: string;
   kind: "EffectProhibition" | "SemanticInvariant" | "TemporalObligation";
   source_span: string;
+  origin?: string | null;
   scope?: string[];
   checker?: string | null;
   params?: Record<string, unknown>;

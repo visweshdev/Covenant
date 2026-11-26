@@ -23,8 +23,7 @@
   "main": "./out/src/extension.js",
   "activationEvents": [
     "workspaceContains:covenant.yaml",
-    "onView:covenant.rules",
-    "onView:covenant.overview"
+    "onView:covenant.rules"
   ],
   "contributes": {
     "viewsContainers": {
@@ -39,23 +38,12 @@
     "views": {
       "covenant": [
         {
-          "id": "covenant.overview",
+          "id": "covenant.rules",
           "name": "Workspace",
           "type": "webview"
-        },
-        {
-          "id": "covenant.rules",
-          "name": "Rules"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "covenant.rules",
-        "contents": "No covenant.yaml in this workspace.\n[Compile rules from an instruction](command:covenant.compile)",
-        "when": "!covenant.hasCovenant"
-      }
-    ],
     "commands": [
       {
         "command": "covenant.refresh",
@@ -110,23 +98,12 @@
       "view/title": [
         {
           "command": "covenant.refresh",
-          "when": "view == covenant.rules",
+          "when": "view == covenant.rules && covenant.hasCovenant",
           "group": "navigation@1"
         },
         {
-          "command": "covenant.runTests",
-          "when": "view == covenant.rules",
-          "group": "navigation@2"
-        },
-        {
-          "command": "covenant.approve",
-          "when": "view == covenant.rules",
-          "group": "navigation@3"
-        },
-        {
-          "command": "covenant.amend",
-          "when": "view == covenant.rules",
-          "group": "navigation@4"
+          "command": "covenant.showLog",
+          "when": "view == covenant.rules"
         }
       ],
       "commandPalette": [

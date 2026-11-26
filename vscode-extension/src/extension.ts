@@ -7,7 +7,6 @@ import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
 import { selectPython, setting } from "./python";
 import { Sidebar } from "./sidebar";
-import { RulesTree } from "./tree";
 import { workspaceRelative } from "./workspace-path";
 import type { CompileResult, Decision, Report, Status } from "./types";
 
@@ -91,10 +90,10 @@ class Controller implements vscode.Disposable {
   private error?: string;
   private missingPython?: boolean;
 
-  constructor(readonly folder: vscode.WorkspaceFolder, readonly tree: RulesTree, readonly sidebar: Sidebar) {
+  constructor(readonly folder: vscode.WorkspaceFolder, readonly sidebar: Sidebar) {
     this.cli = new CovenantCli(this.repo, () => setting(folder, "pythonPath", "python"));
     this.decorations = new ProtectedFiles(this.repo, () => this.status);
-    this.statusBar.command = "covenant.overview.focus";
+    this.statusBar.command = "covenant.rules.focus";
     const covenantWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "covenant.yaml"));
     const check = () => void this.refresh();
     covenantWatcher.onDidChange(check);
@@ -195,10 +194,9 @@ class Controller implements vscode.Disposable {
       this.error = undefined;
       this.missingPython = undefined;
       this.publish();
-      this.tree.update(undefined, undefined);
       this.statusBar.text = "$(shield) Covenant: set up";
       this.statusBar.tooltip = "No covenant.yaml. Click to compile rules from an instruction.";
-      this.statusBar.command = "covenant.overview.focus";
+      this.statusBar.command = "covenant.rules.focus";
       this.statusBar.show();
       const attempt = await this.cli.run(["--version"], 10_000);
       if (!this.isOpen || fs.existsSync(this.covenantPath)) return;
@@ -211,7 +209,7 @@ class Controller implements vscode.Disposable {
       }
       return;
     }
-    this.statusBar.command = "covenant.overview.focus";
+    this.statusBar.command = "covenant.rules.focus";
     try {
       const status = await this.cli.json<Status>(["status", "--format", "json"]);
       if (this.disposed) return;
@@ -224,7 +222,6 @@ class Controller implements vscode.Disposable {
       this.status = status;
       this.preview = preview;
       this.warnedNotInstalled = false;
-      this.tree.update(this.status, this.preview);
       this.watchState(this.status.state_dir);
     } catch (err) {
       if (this.disposed) return;
@@ -233,7 +230,6 @@ class Controller implements vscode.Disposable {
       this.error = text;
       this.missingPython = err instanceof CovenantCliError && err.notInstalled;
       this.publish();
-      this.tree.update(undefined, undefined, text);
       this.statusBar.text = "$(error) Covenant: error";
       this.statusBar.tooltip = text;
       this.statusBar.show();
@@ -446,7 +442,6 @@ export interface CovenantApi {
 
 export function activate(context: vscode.ExtensionContext): CovenantApi {
   output = vscode.window.createOutputChannel("Covenant");
-  const tree = new RulesTree();
   const sidebar = new Sidebar(context.extensionUri);
   let controller: Controller | undefined;
   const rebind = () => {
@@ -457,13 +452,9 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     if (!folder) {
       sidebar.update({ restricted: !vscode.workspace.isTrusted });
       void vscode.commands.executeCommand("setContext", "covenant.hasCovenant", false);
-      tree.update(undefined, undefined, vscode.workspace.isTrusted
-        ? "Open a local repository folder to use Covenant."
-        : "Trust this workspace to run Covenant.");
       return;
     }
-    tree.update(undefined, undefined);
-    controller = new Controller(folder, tree, sidebar);
+    controller = new Controller(folder, sidebar);
     controller.publish();
     void controller.refresh();
   };
@@ -478,12 +469,11 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
   }
 
   context.subscriptions.push(
-    output, tree,
+    output,
     { dispose: () => controller?.dispose() },
     vscode.workspace.onDidChangeWorkspaceFolders(rebind),
     vscode.workspace.onDidGrantWorkspaceTrust(rebind),
-    vscode.window.registerTreeDataProvider("covenant.rules", tree),
-    vscode.window.registerWebviewViewProvider("covenant.overview", sidebar),
+    vscode.window.registerWebviewViewProvider("covenant.rules", sidebar),
     register("covenant.refresh", (ctrl) => ctrl.refresh()),
     register("covenant.openPolicy", (ctrl) => vscode.window.showTextDocument(vscode.Uri.file(ctrl.covenantPath))),
     register("covenant.openRule", (ctrl, id: string) => ctrl.openRule(id)),

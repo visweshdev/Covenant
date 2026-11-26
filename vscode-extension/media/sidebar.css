@@ -76,3 +76,25 @@ button.row-button {
   overflow-wrap: anywhere;
 }
 button.row-button:hover { background: var(--vscode-list-hoverBackground); }
+
+.tabs { display: flex; gap: 10px; margin: 0 0 14px; border-bottom: 1px solid var(--vscode-panel-border, transparent); }
+.tabs button {
+  min-width: 0;
+  padding: 6px 1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+.tabs button[aria-pressed="true"] { color: var(--vscode-foreground); border-bottom-color: var(--vscode-textLink-foreground); }
+.tabs button:hover { background: var(--vscode-toolbar-hoverBackground, transparent); color: var(--vscode-foreground); }
+.section-actions { margin-top: 9px; margin-bottom: 10px; }
+.rule { border-bottom: 1px solid var(--vscode-panel-border, transparent); }
+.rule summary { padding: 8px 4px; cursor: pointer; }
+.rule-title { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.rule-id { font: var(--vscode-editor-font-size)/1.4 var(--vscode-editor-font-family); font-weight: 650; }
+.rule-state { color: var(--vscode-descriptionForeground); }
+.rule-text { display: block; margin-inline-start: 14px; }
+.rule-body { display: grid; justify-items: start; gap: 5px; padding: 0 4px 9px 18px; }

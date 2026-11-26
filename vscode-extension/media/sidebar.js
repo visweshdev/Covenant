@@ -2,6 +2,11 @@
   const vscode = acquireVsCodeApi();
   const panel = document.getElementById("panel");
   let revision;
+  let state;
+  const tabs = { overview: "Overview", rules: "Rules" };
+  const previousTab = vscode.getState()?.tab;
+  let tab = Object.hasOwn(tabs, previousTab) ? previousTab : "overview";
+  const expanded = new Set();
 
   function element(tag, className, ...children) {
     const node = document.createElement(tag);
@@ -98,27 +103,89 @@
     return element("div", "stack", ...contents);
   }
 
-  panel.addEventListener("click", (event) => {
-    const target = event.target.closest("button[data-action]");
-    if (target) vscode.postMessage({ action: target.dataset.action, value: target.dataset.value, revision });
-  });
-  window.addEventListener("message", ({ data }) => {
-    if (data?.type !== "state") return;
-    const { state } = data;
-    revision = data.revision;
+  function ruleRow(rule, state) {
+    const issues = state.reports.filter((report) => report.id === rule.id);
+    const hint = rule.status === "pending_clarification" ? "Needs input"
+      : rule.status !== "enforced" ? "Manual"
+        : !state.status.has_session ? "Awaiting approval"
+          : issues.some((issue) => !issue.reminder) ? "Review"
+            : issues.length ? "Reminder" : "Passing";
+    const meta = [rule.checker, rule.response, rule.origin].filter(Boolean).join(" · ");
+    const content = [
+      meta ? element("p", "muted", meta) : element("p", "muted", "Manual review"),
+      ...(rule.scope ?? []).map((scope) => element("p", "", `Scope: ${scope}`)),
+      ...(rule.assumptions ?? []).map((assumption) => element("p", "", `Assumes ${assumption}`)),
+      ...(rule.blocks ? [element("p", "", `Blocks this task: ${rule.blocks}`)] : []),
+    ];
+    if (!rule.origin) content.push(button("Open Rule", "rule", false, rule.id));
+    const details = element("details", "rule", element("summary", "",
+      element("span", "rule-title", element("span", "rule-id", rule.id), element("span", "rule-state", hint)),
+      element("span", "rule-text", rule.text || rule.id)), element("div", "rule-body", ...content));
+    details.dataset.rule = rule.id;
+    details.querySelector("summary").dataset.rule = rule.id;
+    details.open = expanded.has(rule.id);
+    return details;
+  }
+
+  function rulesContents(state) {
+    if (!state.status) {
+      return element("section", "section", element("h2", "", "Rules"),
+        element("p", "muted", state.policy ? "Get a successful check to view your rules." : "Create a rules file to see your rules here."),
+        state.folder && !state.policy ? button("Draft Rules", "compile", true) : "");
+    }
+    const rules = state.status.rules;
+    const enforced = rules.filter((rule) => rule.status === "enforced").length;
+    return element("section", "section",
+      element("h2", "", "Workspace rules"),
+      element("p", "muted", `${enforced} automatic · ${rules.length - enforced} need human input or review`),
+      element("div", "section-actions actions", button("Open YAML", "openPolicy"), button("Add a Rule", "amend")),
+      element("div", "rule-list", ...rules.map((rule) => ruleRow(rule, state))),
+    );
+  }
+
+  function render() {
     const folder = state.folder ? element("p", "workspace", state.folder) : document.createTextNode("");
     const focus = document.activeElement?.dataset;
-    const contents = overviewContents(state);
+    for (const details of panel.querySelectorAll("details[data-rule]")) {
+      if (details.open) expanded.add(details.dataset.rule);
+      else expanded.delete(details.dataset.rule);
+    }
+    const nav = element("nav", "tabs", ...Object.entries(tabs).map(([id, label]) => {
+      const control = button(label, "tab", false, id);
+      control.setAttribute("aria-pressed", String(tab === id));
+      return control;
+    }));
+    nav.setAttribute("aria-label", "Covenant sections");
+    const contents = tab === "rules" ? rulesContents(state) : overviewContents(state);
     if (state.busy) {
       for (const control of contents.querySelectorAll("button[data-action]")) {
-        if (["compile", "approve", "init", "python", "test"].includes(control.dataset.action)) control.disabled = true;
+        if (["compile", "approve", "init", "python", "test", "amend"].includes(control.dataset.action)) control.disabled = true;
       }
     }
     const progress = element("p", state.busy ? "progress" : "visually-hidden", state.busy ? `${state.busy} in progress…` : "");
     progress.setAttribute("role", "status");
-    panel.replaceChildren(folder, progress, contents);
+    panel.replaceChildren(folder, nav, progress, contents);
     if (focus?.action) [...panel.querySelectorAll("button[data-action]")]
       .find((control) => control.dataset.action === focus.action && control.dataset.value === focus.value)?.focus();
+    if (focus?.rule) [...panel.querySelectorAll("details[data-rule]")]
+      .find((details) => details.dataset.rule === focus.rule)?.querySelector("summary").focus();
+  }
+
+  panel.addEventListener("click", (event) => {
+    const target = event.target.closest("button[data-action]");
+    if (!target) return;
+    const { action, value } = target.dataset;
+    if (action === "tab") {
+      tab = value;
+      vscode.setState({ tab });
+      render();
+    } else vscode.postMessage({ action, value, revision });
+  });
+  window.addEventListener("message", ({ data }) => {
+    if (data?.type !== "state") return;
+    state = data.state;
+    revision = data.revision;
+    render();
   });
   vscode.postMessage({ action: "ready" });
 })();
