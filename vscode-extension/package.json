@@ -23,7 +23,8 @@
   "main": "./out/src/extension.js",
   "activationEvents": [
     "workspaceContains:covenant.yaml",
-    "onView:covenant.rules"
+    "onView:covenant.rules",
+    "onView:covenant.overview"
   ],
   "contributes": {
     "viewsContainers": {
@@ -37,6 +38,11 @@
     },
     "views": {
       "covenant": [
+        {
+          "id": "covenant.overview",
+          "name": "Workspace",
+          "type": "webview"
+        },
         {
           "id": "covenant.rules",
           "name": "Rules"
