@@ -5,7 +5,7 @@ import { CovenantCli, CovenantCliError } from "./cli";
 import { preservePolicies, readPolicy, writeDraft } from "./draft";
 import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
-import { starters } from "./prompts";
+import { starters, type Starter } from "./prompts";
 import { selectPython, setting } from "./python";
 import { Sidebar } from "./sidebar";
 import { workspaceRelative } from "./workspace-path";
@@ -338,21 +338,39 @@ class Controller implements vscode.Disposable {
   }
 }
 
-async function compileCommand(ctrl: Controller): Promise<void> {
-  const instruction = await vscode.window.showInputBox({
-    title: "Covenant: compile rules",
-    prompt: "The instruction you would give the coding agent",
-    placeHolder: "Update dependencies, but don't change public APIs, don't delete user data, and run tests before committing.",
+async function compilerOptions(ctrl: Controller, local = false): Promise<string[] | undefined> {
+  if (local || setting(ctrl.folder, "offlineCompile", false)) return ["--offline"];
+  const pick = await vscode.window.showQuickPick([
+    { label: "Compile locally", description: "Uses the offline pattern extractor", flags: ["--offline"] },
+    { label: "Compile with Claude", description: "Sends the instruction and repository context to the configured backend", flags: [] },
+  ], { title: "Covenant: Choose Compiler", ignoreFocusOut: true });
+  return pick?.flags;
+}
+
+async function chooseStarter(): Promise<Starter | undefined> {
+  const pick = await vscode.window.showQuickPick(starters.map((starter) => ({
+    label: starter.title, description: starter.goal, detail: starter.instruction, starter,
+  })), { title: "Covenant: Choose Starter Prompt", matchOnDetail: true, matchOnDescription: true });
+  return pick?.starter;
+}
+
+async function compileCommand(ctrl: Controller, starter?: Starter): Promise<void> {
+  const instruction = (await vscode.window.showInputBox({
+    title: starter ? `Covenant: ${starter.title}` : "Covenant: Draft Rules",
+    prompt: starter ? "Edit this starter to fit your repository" : "Describe the rules your coding agent should follow",
+    value: starter?.instruction,
+    placeHolder: "Do not change public APIs. Run tests before committing.",
     ignoreFocusOut: true,
-  });
+  }))?.trim();
   if (!instruction || !ctrl.isOpen) return;
-  const compiler = setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [];
-  const base = ["compile", instruction, "--unattended", "--format", "json", ...compiler];
+  const compiler = await compilerOptions(ctrl, Boolean(starter));
+  if (!compiler || !ctrl.isOpen) return;
+  const base = ["compile", "--unattended", "--format", "json", ...compiler];
 
   const original = readPolicy(ctrl.covenantPath);
   const draft = (answers: string[]) =>
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" }, () =>
-      ctrl.cli.json<CompileResult>([...base, "--dry-run", ...answers.flatMap((a) => ["--answer", a])], 900_000, 3),
+      ctrl.cli.json<CompileResult>([...base, "--dry-run", ...answers.flatMap((a) => ["--answer", a]), "--", instruction], 900_000, 3),
     );
 
   let result = await draft([]);
@@ -409,10 +427,12 @@ async function amendCommand(ctrl: Controller): Promise<void> {
     ignoreFocusOut: true,
   });
   if (!instruction || !ctrl.isOpen) return;
-  const base = ["amend", instruction, "--unattended", ...(setting(ctrl.folder, "offlineCompile", false) ? ["--offline"] : [])];
+  const compiler = await compilerOptions(ctrl);
+  if (!compiler || !ctrl.isOpen) return;
+  const base = ["amend", "--unattended", ...compiler];
   const draft = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Covenant: compiling…" },
-    () => ctrl.cli.run([...base, "--dry-run"], 900_000),
+    () => ctrl.cli.run([...base, "--dry-run", "--", instruction], 900_000),
   );
   output.append(draft.stderr);
   if (draft.code !== 0) {
@@ -427,7 +447,7 @@ async function amendCommand(ctrl: Controller): Promise<void> {
     "Add",
   );
   if (choice !== "Add" || !ctrl.isOpen) return;
-  const code = await ctrl.runLogged("Covenant: adding rules…", [...base, "--yes"]);
+  const code = await ctrl.runLogged("Covenant: adding rules…", [...base, "--yes", "--", instruction]);
   if (code !== 0) {
     void vscode.window.showErrorMessage("Covenant couldn't add the rules; see the Covenant output.");
     output.show();
@@ -480,15 +500,17 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     register("covenant.openRule", (ctrl, id: string) => ctrl.openRule(id)),
     register("covenant.openViolation", (ctrl, report: Report) => ctrl.openViolation(report)),
     register("covenant.compile", (ctrl) => ctrl.act("Draft rules", () => compileCommand(ctrl))),
+    register("covenant.draftStarter", (ctrl, id?: string) => ctrl.act("Draft starter rules", async () => {
+      const starter = id === undefined ? await chooseStarter() : starters.find((item) => item.id === id);
+      if (starter && ctrl.isOpen) await compileCommand(ctrl, starter);
+    })),
     register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
     register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
-    vscode.commands.registerCommand("covenant.copyStarter", async () => {
-      const pick = await vscode.window.showQuickPick(starters.map((starter) => ({
-        label: starter.title, description: starter.goal, detail: starter.instruction, starter,
-      })), { title: "Covenant: Copy Starter Prompt", matchOnDetail: true, matchOnDescription: true });
-      if (!pick) return;
-      await vscode.env.clipboard.writeText(pick.starter.instruction);
+    vscode.commands.registerCommand("covenant.copyStarter", async (id?: string) => {
+      const starter = id === undefined ? await chooseStarter() : starters.find((item) => item.id === id);
+      if (!starter) return;
+      await vscode.env.clipboard.writeText(starter.instruction);
       void vscode.window.showInformationMessage("Covenant starter prompt copied.");
     }),
     vscode.commands.registerCommand("covenant.copyInstall", async () => {

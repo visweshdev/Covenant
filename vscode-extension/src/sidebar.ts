@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { isReminder, message as reportMessage } from "./locate";
+import { starters } from "./prompts";
 import type { Decision, Status } from "./types";
 
 export interface SidebarState {
@@ -46,7 +47,7 @@ export class Sidebar implements vscode.WebviewViewProvider {
     return webview.postMessage({
       type: "state", revision: this.revision,
       state: {
-        ...workspace,
+        ...workspace, starters,
         status: status && {
           has_session: status.has_session,
           repo_covenant_changed: status.repo_covenant_changed,
@@ -71,6 +72,11 @@ export class Sidebar implements vscode.WebviewViewProvider {
     const messages = webview.onDidReceiveMessage(async (message: { action?: unknown; value?: unknown; revision?: unknown }) => {
       if (message?.action === "ready") {
         await this.send(webview);
+      } else if (message?.action === "draftStarter" || message?.action === "copyStarter") {
+        const starter = starters.find((item) => item.id === message.value);
+        if (!starter) return;
+        const command = message.action === "draftStarter" ? "covenant.draftStarter" : "covenant.copyStarter";
+        await vscode.commands.executeCommand(command, starter.id);
       } else if (message?.action === "rule" && this.revision === message.revision) {
         const rule = this.state.status?.clauses.find((clause) => clause.id === message.value);
         if (rule && !rule.origin) await vscode.commands.executeCommand("covenant.openRule", rule.id);

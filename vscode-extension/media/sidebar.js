@@ -3,7 +3,7 @@
   const panel = document.getElementById("panel");
   let revision;
   let state;
-  const tabs = { overview: "Overview", rules: "Rules" };
+  const tabs = { overview: "Overview", rules: "Rules", guide: "Guide" };
   const previousTab = vscode.getState()?.tab;
   let tab = Object.hasOwn(tabs, previousTab) ? previousTab : "overview";
   const expanded = new Set();
@@ -56,7 +56,7 @@
     }
     if (!state.policy) {
       return statusCard("neutral", "Setup needed", "Give your agent clear rules",
-        "Draft rules from an instruction, review them, then start a task.", button("Draft Rules", "compile", true));
+        "Draft rules from an instruction, review them, then start a task.", button("Draft Rules", "compile", true), button("Starter Prompts", "tab", false, "guide"));
     }
     if (!state.status) return element("p", "muted", "Checking workspace…");
     if (!state.status.has_session) {
@@ -143,6 +143,24 @@
     );
   }
 
+  function promptLibrary(state) {
+    return element("section", "section",
+      element("h2", "", "Starter prompts"),
+      element("p", "muted", "Edit a starter to draft rules locally, or copy it for your coding agent."),
+      element("div", "prompt-list", ...state.starters.map((starter) => {
+        const actions = [];
+        if (state.folder && !state.restricted && !state.missingPython) {
+          actions.push(button("Use Prompt", "draftStarter", false, starter.id));
+        }
+        const copy = button("Copy", "copyStarter", false, starter.id);
+        copy.setAttribute("aria-label", `Copy prompt: ${starter.title}`);
+        actions.push(copy);
+        return element("article", "prompt", element("h3", "", starter.title), element("p", "muted", starter.goal),
+          element("p", "prompt-instruction", starter.instruction), element("div", "actions", ...actions));
+      })),
+    );
+  }
+
   function render() {
     const folder = state.folder ? element("p", "workspace", state.folder) : document.createTextNode("");
     const focus = document.activeElement?.dataset;
@@ -156,10 +174,10 @@
       return control;
     }));
     nav.setAttribute("aria-label", "Covenant sections");
-    const contents = tab === "rules" ? rulesContents(state) : overviewContents(state);
+    const contents = { rules: rulesContents, guide: promptLibrary, overview: overviewContents }[tab](state);
     if (state.busy) {
       for (const control of contents.querySelectorAll("button[data-action]")) {
-        if (["compile", "approve", "init", "python", "test", "amend"].includes(control.dataset.action)) control.disabled = true;
+        if (["compile", "approve", "init", "python", "test", "amend", "draftStarter"].includes(control.dataset.action)) control.disabled = true;
       }
     }
     const progress = element("p", state.busy ? "progress" : "visually-hidden", state.busy ? `${state.busy} in progress…` : "");

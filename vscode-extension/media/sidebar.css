@@ -98,3 +98,12 @@ button.row-button:hover { background: var(--vscode-list-hoverBackground); }
 .rule-state { color: var(--vscode-descriptionForeground); }
 .rule-text { display: block; margin-inline-start: 14px; }
 .rule-body { display: grid; justify-items: start; gap: 5px; padding: 0 4px 9px 18px; }
+
+.prompt-list { margin-top: 8px; }
+.prompt { display: grid; gap: 7px; padding: 10px 0; border-top: 1px solid var(--vscode-panel-border, transparent); }
+.prompt h3 { margin: 0; font-size: 1em; font-weight: 650; }
+.prompt-instruction {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--vscode-textBlockQuote-border);
+  color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
+}

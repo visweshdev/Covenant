@@ -96,6 +96,10 @@
       {
         "command": "covenant.copyStarter",
         "title": "Covenant: Copy Starter Prompt"
+      },
+      {
+        "command": "covenant.draftStarter",
+        "title": "Covenant: Draft Rules from a Starter Prompt"
       }
     ],
     "menus": {
