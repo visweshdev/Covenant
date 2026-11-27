@@ -5,6 +5,7 @@ name: release
 #     pypi.org under "Publishing" for this repo and the workflow file release.yml, environment pypi)
 #   - the VS Code extension to the Marketplace, if the VSCE_PAT secret is set
 #   - a GitHub release with the wheel, the source archive and the .vsix attached
+# Documentation post-releases only publish to PyPI.
 on:
   push:
     tags: ["v*"]
@@ -40,9 +41,11 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - uses: actions/setup-node@v4
+        if: ${{ !contains(github.ref_name, '.post') }}
         with:
           node-version: "22"
       - name: Package the VS Code extension
+        if: ${{ !contains(github.ref_name, '.post') }}
         working-directory: vscode-extension
         run: |
           npm ci || npm install
@@ -68,6 +71,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   marketplace:
+    if: ${{ !contains(github.ref_name, '.post') }}
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -84,6 +88,7 @@ jobs:
           npx --yes @vscode/vsce@3 publish --packagePath dist/*.vsix
 
   github-release:
+    if: ${{ !contains(github.ref_name, '.post') }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
