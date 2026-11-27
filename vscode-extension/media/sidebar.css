@@ -17,7 +17,8 @@ body {
 p, h1 { margin: 0; }
 h1 { font-size: 1.35em; line-height: 1.22; font-weight: 650; }
 .muted { color: var(--vscode-descriptionForeground, var(--vscode-foreground)); }
-.workspace { margin-bottom: 10px; font-weight: 600; }
+.workspace { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin-bottom: 10px; font-weight: 650; }
+.workspace button { font-weight: 400; }
 
 .status-card {
   --tone: var(--vscode-textLink-foreground);

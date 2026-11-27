@@ -14,9 +14,15 @@ import type { CompileResult, Decision, Report, Status } from "./types";
 
 let output: vscode.OutputChannel;
 
-function findFolder(): vscode.WorkspaceFolder | undefined {
-  const folders = (vscode.workspace.workspaceFolders ?? []).filter((folder) => folder.uri.scheme === "file");
-  return folders.find((folder) => fs.existsSync(path.join(folder.uri.fsPath, "covenant.yaml"))) ?? folders[0];
+function localFolders(): vscode.WorkspaceFolder[] {
+  return (vscode.workspace.workspaceFolders ?? []).filter((folder) => folder.uri.scheme === "file");
+}
+
+function findFolder(selected: string | undefined): vscode.WorkspaceFolder | undefined {
+  const folders = localFolders();
+  return folders.find((folder) => folder.uri.toString() === selected)
+    ?? folders.find((folder) => fs.existsSync(path.join(folder.uri.fsPath, "covenant.yaml")))
+    ?? folders[0];
 }
 
 function fileAccess(repo: string): FileAccess {
@@ -124,6 +130,7 @@ class Controller implements vscode.Disposable {
   }
 
   get isOpen(): boolean { return !this.disposed; }
+  get busy(): boolean { return Boolean(this.activeAction); }
 
   async act(label: string, action: () => Promise<void>): Promise<void> {
     if (this.activeAction) {
@@ -182,7 +189,8 @@ class Controller implements vscode.Disposable {
 
   publish(): void {
     this.sidebar.update({
-      folder: this.folder.name, policy: fs.existsSync(this.covenantPath), status: this.status,
+      folder: this.folder.name, folderKey: this.folder.uri.toString(), canSwitch: localFolders().length > 1,
+      policy: fs.existsSync(this.covenantPath), status: this.status,
       preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction,
     });
   }
@@ -467,8 +475,11 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
   const sidebar = new Sidebar(context.extensionUri);
   let controller: Controller | undefined;
   const rebind = () => {
-    const folder = vscode.workspace.isTrusted ? findFolder() : undefined;
-    if (folder && folder.uri.toString() === controller?.folder.uri.toString()) return;
+    const folder = vscode.workspace.isTrusted ? findFolder(context.workspaceState.get<string>("selectedFolder")) : undefined;
+    if (folder && folder.uri.toString() === controller?.folder.uri.toString()) {
+      controller.publish();
+      return;
+    }
     controller?.dispose();
     controller = undefined;
     if (!folder) {
@@ -495,6 +506,20 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     { dispose: () => controller?.dispose() },
     vscode.workspace.onDidChangeWorkspaceFolders(rebind),
     vscode.workspace.onDidGrantWorkspaceTrust(rebind),
+    register("covenant.selectWorkspace", async (ctrl) => {
+      if (ctrl.busy) return;
+      const folders = localFolders();
+      if (folders.length < 2) return;
+      const selected = await vscode.window.showQuickPick(folders.map((folder) => ({
+        label: folder.name,
+        description: folder.uri.toString() === ctrl.folder.uri.toString() ? "Current folder" : undefined,
+        detail: folder.uri.fsPath,
+        folder,
+      })), { title: "Covenant: Select Workspace Folder", matchOnDetail: true });
+      if (!selected || !ctrl.isOpen || ctrl.busy) return;
+      await context.workspaceState.update("selectedFolder", selected.folder.uri.toString());
+      rebind();
+    }),
     vscode.window.registerWebviewViewProvider("covenant.rules", sidebar),
     register("covenant.refresh", (ctrl) => ctrl.refresh()),
     register("covenant.openPolicy", (ctrl) => vscode.window.showTextDocument(vscode.Uri.file(ctrl.covenantPath))),

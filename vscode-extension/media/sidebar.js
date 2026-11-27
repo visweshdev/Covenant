@@ -2,6 +2,7 @@
   const vscode = acquireVsCodeApi();
   const panel = document.getElementById("panel");
   let revision;
+  let workspaceId;
   let state;
   const tabs = { overview: "Overview", rules: "Rules", guide: "Guide" };
   const previousTab = vscode.getState()?.tab;
@@ -187,7 +188,12 @@
   }
 
   function render() {
-    const folder = state.folder ? element("p", "workspace", state.folder) : document.createTextNode("");
+    const folder = state.folder ? element("div", "workspace", element("span", "", state.folder)) : "";
+    if (state.canSwitch) {
+      const switcher = button("Switch Folder", "selectWorkspace");
+      switcher.disabled = Boolean(state.busy);
+      folder.append(switcher);
+    }
     const focus = document.activeElement?.dataset;
     const setup = panel.querySelector("details[data-setup]");
     if (setup) guideExpanded = setup.open;
@@ -225,11 +231,17 @@
       tab = value;
       vscode.setState({ tab });
       render();
-    } else vscode.postMessage({ action, value, revision });
+    } else vscode.postMessage({ action, value, revision, workspaceId });
   });
   window.addEventListener("message", ({ data }) => {
     if (data?.type !== "state") return;
+    if (workspaceId !== data.workspaceId) {
+      panel.replaceChildren();
+      expanded.clear();
+      guideExpanded = undefined;
+    }
     state = data.state;
+    workspaceId = data.workspaceId;
     revision = data.revision;
     render();
   });

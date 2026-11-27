@@ -108,6 +108,10 @@
       {
         "command": "covenant.copyHandoff",
         "title": "Covenant: Copy Agent Handoff"
+      },
+      {
+        "command": "covenant.selectWorkspace",
+        "title": "Covenant: Select Workspace Folder"
       }
     ],
     "menus": {
