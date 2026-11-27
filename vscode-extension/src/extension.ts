@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import { agentHandoff, mcpClients, mcpConfig } from "./agent";
 import { CovenantCli, CovenantCliError } from "./cli";
 import { preservePolicies, readPolicy, writeDraft } from "./draft";
 import { protectingClause } from "./glob";
@@ -505,6 +506,20 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
       if (starter && ctrl.isOpen) await compileCommand(ctrl, starter);
     })),
     register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
+    register("covenant.copyMcp", async (ctrl) => {
+      const pick = await vscode.window.showQuickPick(
+        mcpClients.map((client) => ({ label: client.label, detail: client.file, client })),
+        { title: "Covenant: Copy MCP Setup", placeHolder: ctrl.folder.name },
+      );
+      if (!pick || !ctrl.isOpen) return;
+      const python = setting(ctrl.folder, "pythonPath", "python");
+      await vscode.env.clipboard.writeText(mcpConfig(pick.client.id, python, ctrl.repo));
+      void vscode.window.showInformationMessage(`Covenant MCP setup copied. Merge it into ${pick.client.file}.`);
+    }),
+    vscode.commands.registerCommand("covenant.copyHandoff", async () => {
+      await vscode.env.clipboard.writeText(agentHandoff);
+      void vscode.window.showInformationMessage("Covenant agent handoff copied.");
+    }),
     register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
     vscode.commands.registerCommand("covenant.copyStarter", async (id?: string) => {

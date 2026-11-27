@@ -100,6 +100,14 @@
       {
         "command": "covenant.draftStarter",
         "title": "Covenant: Draft Rules from a Starter Prompt"
+      },
+      {
+        "command": "covenant.copyMcp",
+        "title": "Covenant: Copy MCP Setup"
+      },
+      {
+        "command": "covenant.copyHandoff",
+        "title": "Covenant: Copy Agent Handoff"
       }
     ],
     "menus": {

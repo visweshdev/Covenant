@@ -177,7 +177,13 @@
     setup.open = guideExpanded ?? !state.status?.has_session;
     setup.dataset.setup = "true";
     setup.querySelector("summary").dataset.setup = "true";
-    return element("div", "stack", setup, promptLibrary(state));
+    const actions = [];
+    if (state.folder && !state.restricted) actions.push(button("Copy MCP Setup", "copyMcp"));
+    actions.push(button("Copy Agent Handoff", "copyHandoff"));
+    const integration = element("section", "section", element("h2", "", "Use with your coding agent"),
+      element("p", "muted", "Copy MCP setup for VS Code, Cursor, or Codex. Paste the handoff into a chat after starting a task. Git hooks check commits and pushes even when the agent skips MCP."),
+      element("div", "actions section-actions", ...actions));
+    return element("div", "stack", setup, promptLibrary(state), integration);
   }
 
   function render() {

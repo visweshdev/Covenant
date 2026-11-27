@@ -26,6 +26,8 @@ const commands = new Map([
   ["test", "covenant.runTests"],
   ["openPolicy", "covenant.openPolicy"],
   ["copyInstall", "covenant.copyInstall"],
+  ["copyMcp", "covenant.copyMcp"],
+  ["copyHandoff", "covenant.copyHandoff"],
   ["output", "covenant.showLog"],
 ]);
 
