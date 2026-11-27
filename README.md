@@ -12,17 +12,23 @@
 <p align="center">
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
   <a href="#how-it-works"><b>How it works</b></a> &nbsp;·&nbsp;
+  <a href="#key-terms"><b>Key terms</b></a> &nbsp;·&nbsp;
   <a href="#what-it-can-enforce"><b>Rules</b></a> &nbsp;·&nbsp;
+  <a href="#evaluation"><b>Evaluation</b></a> &nbsp;·&nbsp;
   <a href="https://github.com/visweshdev/Covenant/blob/main/docs/README.md"><b>Docs</b></a> &nbsp;·&nbsp;
   <a href="https://github.com/visweshdev/Covenant/blob/main/CHANGELOG.md"><b>Changelog</b></a>
 </p>
 
 <br>
 
-Covenant turns plain-English instructions into repository rules for coding agents. Use it to
-check for public API changes, protect data files, and require a passing test run after the last
-recorded edit. It checks changes and recorded events at supported checkpoints, and Claude Code
-hooks can refuse covered actions before they run.
+**Covenant is a policy enforcement layer for coding agent harnesses.** It turns plain-English
+repository instructions into executable checks. Use it to preserve public APIs, protect data
+files, and require a passing test run after the last recorded edit before a commit.
+
+**Harness engineering** is the work of building the environment, checks, and feedback loops
+that help agents work reliably. Covenant handles repository policy in that environment. It plugs
+into existing coding agents, Git, and CI to check actions and outcomes, then gives the agent
+evidence and a way to correct violations. [OpenAI’s overview of harness engineering](https://openai.com/index/harness-engineering/)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/demo.svg" width="100%" alt="Animated illustration: an agent tries a force push, destructive SQL and an untested commit; Covenant refuses each, then allows the commit once the tests pass">
@@ -42,9 +48,10 @@ covenant status
 ```
 
 Run this in a Git repository with at least one commit. Review the draft before accepting
-`covenant.yaml`. The example uses the offline compiler, which works without Claude credentials.
-`covenant init` installs Git and Claude Code hooks and approves the rules for a new task.
-Covenant requires Python 3.11+ and Git and supports Windows, macOS and Linux.
+`covenant.yaml`, especially the inferred API scope, protected paths, and test command.
+`covenant init` installs Git and Claude Code hooks and pins the approved rules for the task.
+Covenant requires Python 3.11+ and Git and supports Windows, macOS, and Linux. The offline
+compiler in this example works without Claude credentials.
 
 **Already have Git hooks?** Use `covenant init --no-git` and integrate Covenant with your
 hooks. PyPI 0.1.2 replaces existing default hooks, while the current source refuses to
@@ -60,25 +67,48 @@ overwrite them. [Git hook setup](https://github.com/visweshdev/Covenant/blob/mai
   <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/how-it-works.svg" width="100%" alt="Covenant compiles plain English into typed rules that can run through agent hooks, Git hooks, and CI">
 </p>
 
-When something breaks a rule, the agent gets the rule, the evidence and a fix, and you can ask
-for the story any time:
+1. **Compile.** `covenant compile` maps an instruction to a checker and repository-specific
+   settings in `covenant.yaml`. Use the offline compiler or configure a Claude backend.
+2. **Approve.** Review the generated clauses, scope, and assumptions. `covenant init` or
+   `covenant start` pins the approved rules for the task.
+3. **Enforce.** Claude Code hooks can refuse covered tool calls before they run. Git hooks
+   check commits and pushes. CI checks pull-request changes against the merge-base rules when
+   available and can rerun declared tests on the pull request's final state. Step-order rules
+   use events recorded by the active integration.
+4. **Respond.** A violation report identifies the rule, the evidence, and a suggested fix.
+   Depending on the rule, Covenant can block, warn, restore protected files or SQLite rows,
+   or hand the task to a human. `covenant explain` shows what happened.
 
-```text
-$ covenant explain
-At 01:23 on 01 Nov, the agent tried to use a tool. Covenant blocked it.
-
-Rule C3: "never run destructive SQL"
-  Why: The command counts as SQL that drops a table, database or schema: psql -c "DROP TABLE users".
-  What the agent can do: Don't drop, truncate or wipe tables; change rows with a WHERE, or ask the human
-```
+For example, **“run tests before committing”** becomes a rule checked against the task's
+recorded events. If the agent edits a file after the last passing test run, Covenant blocks the
+next commit at a configured checkpoint until a passing run of the declared test command is
+recorded. `covenant test` runs and records that command. [What counts as a test run](https://github.com/visweshdev/Covenant/blob/main/docs/rules.md#what-counts-as-a-test-run)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/visweshdev/Covenant/main/docs/assets/features.svg" width="100%" alt="Outcome checks, tool preflight, restore points, violation reports, agent integrations, and CI checks">
 </p>
 
+### Key terms
+
+| Term | Meaning in Covenant |
+|---|---|
+| **Agent harness** | The software that runs the agent's model calls and routes tool calls during a session. |
+| **Policy and clause** | `covenant.yaml` contains the repository policy. Each clause is one rule with its own ID, scope, and response to a violation. |
+| **Checker** | The implementation that verifies a clause. For example, `api_surface_diff` compares exported names and signatures. |
+| **Checkpoint** | A point where an integration runs checks, such as before a covered tool call, at commit or push, at task end, or in CI. |
+| **Task trace** | Recorded events such as edits, test results, commits, and pushes. The `trace_monitor` checker uses them to verify order and counts. |
+| **Violation response** | The clause's `on_violation` setting. Choose `block`, `warn`, `rollback`, or `ask_human`. |
+
+Clauses have three kinds. An **effect prohibition** (`EffectProhibition`) forbids an action
+or side effect, such as force-pushing or deleting protected data. A **semantic invariant**
+(`SemanticInvariant`) preserves a property of the code, such as the public API. A **temporal
+obligation** (`TemporalObligation`) constrains the order or count of steps, such as passing
+tests before committing. [Rules file reference](https://github.com/visweshdev/Covenant/blob/main/docs/covenant-yaml.md)
+
 ## What it can enforce
 
-Say it in plain English; Covenant picks the checker.
+Review the checker and its scope when you approve a rule. The rules reference lists available
+checkers, including the advisory `llm_review` checker.
 
 | You say | Covenant checks |
 |---|---|
@@ -103,11 +133,11 @@ Say it in plain English; Covenant picks the checker.
 <table>
 <tr>
   <td width="33%" valign="top"><h3>🤖 Claude Code</h3>Tool hooks can refuse covered actions, record test runs and request revisions at task end.</td>
-  <td width="33%" valign="top"><h3>🧩 Cursor, Codex and MCP</h3>Clients can query rules, check commands and run tests through the MCP server.</td>
+  <td width="33%" valign="top"><h3>🧩 Cursor, Codex and MCP</h3>Model Context Protocol (MCP) clients can query rules, check commands, and run tests. Install Git hooks for commit and push checks.</td>
   <td width="33%" valign="top"><h3>🌿 Git</h3>Installed pre-commit and pre-push hooks check the changes Git presents to Covenant.</td>
 </tr>
 <tr>
-  <td width="33%" valign="top"><h3>✅ GitHub</h3>An Action that checks changes against the base rules and can comment on findings.</td>
+  <td width="33%" valign="top"><h3>✅ GitHub and CI</h3>The GitHub Action can report findings on a pull request. Other CI systems can run <code>covenant ci</code>.</td>
   <td width="33%" valign="top"><h3>🧑‍💻 VS Code</h3>A workspace sidebar with live findings, searchable rules, starter prompts, and setup for coding agents.</td>
   <td width="33%" valign="top"><h3>🐳 Docker</h3><code>covenant sandbox</code> runs the agent with an HTTP(S) allowlist proxy and a separate hook state volume.</td>
 </tr>
@@ -118,8 +148,10 @@ Say it in plain English; Covenant picks the checker.
   <a href="https://github.com/visweshdev/Covenant/blob/main/docs/ci.md"><b>CI and the GitHub Action →</b></a>
 </p>
 
-See the [safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md) for
-local hook, sandbox, and CI boundaries.
+Other agents and scripts can supply events with `covenant record` and `covenant test`.
+Coverage depends on the approved rules and the events each integration delivers. Local hooks
+run with the user's permissions. The Docker sandbox adds a network allowlist and separate
+hook state as defense in depth for cooperative agents. [Safety model](https://github.com/visweshdev/Covenant/blob/main/docs/safety.md)
 
 ## Evaluation
 
@@ -135,6 +167,9 @@ task. Every honest task committed; every trap was refused or blocked.
 
 The six scripted CovenantBench tasks averaged **1.17 violations per task with the instruction
 alone and 0 with Covenant and developer answers**. Both modes completed all six tasks.
+
+A labeled hook test matched **all 24 expected preflight decisions** across its documented
+file and command cases. CI reruns those cases. [Labeled hook decisions](https://github.com/visweshdev/Covenant/blob/main/bench/README.md#labeled-hook-decisions)
 
 A historical replay of **1,446 commits from 50 repositories** flagged 75 commits. Review found
 72 rule breaks, two false alarms and one unclear case. Only flagged commits were reviewed,
