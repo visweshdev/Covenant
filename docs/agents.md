@@ -214,12 +214,18 @@ covenant sandbox --print                # writes the files and shows the docker 
 
 ## VS Code
 
-The extension in `vscode-extension/` adds a Covenant panel, the current violations in Problems,
-a 🔒 badge on protected files, and commands to compile rules, approve them and run tests. It
-updates live as an agent's hooks record events, and its checks never change files.
+Open **Covenant** in the Activity Bar after opening a trusted Git repository. **Overview**
+shows setup, check results, and task activity. **Rules** lets you search and inspect the
+active policy. **Guide** walks through setup and provides editable starter prompts, a
+copyable agent handoff, and MCP snippets for VS Code, Cursor, and Codex.
 
-See the [extension's README](../vscode-extension/README.md) for its commands, settings and
-build. A built `.vsix` is attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).
+Use **Set Up Hooks** to choose Git only or Git and project-local Claude Code hooks. Use
+**Start Task** to pin a baseline for preview checks. Findings appear both in the sidebar
+and in Problems, and protected files are marked in the Explorer.
+
+See the [extension README](../vscode-extension/README.md) for interpreter setup,
+commands, and build instructions. A VSIX is attached to each
+[GitHub release](https://github.com/visweshdev/Covenant/releases).
 
 ---
 

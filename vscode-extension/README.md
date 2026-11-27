@@ -4,85 +4,83 @@
 
 ---
 
-## Requirements
+## Get started
 
-Use VS Code 1.100 or later and install Covenant into a Python 3.11+ environment that VS Code
-can access.
+Use VS Code 1.100 or later and install Covenant in a Python 3.11+ environment the editor can
+access.
 
 ```bash
 python -m pip install covenant-agents
 python -m covenant --version
 ```
 
-Set `covenant.pythonPath` to that interpreter if it differs from the editor's default
-`python`. If you use pipx, point the setting at the Python executable inside Covenant's
-pipx environment.
+1. Open a trusted Git repository folder and select **Covenant** in the Activity Bar.
+   In a multi-root workspace, use **Switch Folder** to choose where to check or write rules.
+2. Use **Select Python** if Covenant is installed in a virtual environment or pipx.
+   The interpreter selection applies to the chosen folder.
+3. Choose **Draft Rules** for your own instruction or **Guide → Starter prompts**.
+   Edit a starter to fit your project. Review the generated YAML and its warnings,
+   then choose **Write Rules** in the sidebar. You can reopen or discard the pending draft.
+4. Select **Set Up Hooks** and choose Git only or Git with project-local Claude Code hooks.
+   Choose **Start Task** if the hooks are already in place or you want to pin a baseline
+   for editor checks only. Use the manual setup for existing Git hooks.
+   [Git hook setup](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md#git-hooks)
 
-Open the Git repository as a workspace folder and select **Covenant** in the Activity Bar.
-Open an existing `covenant.yaml` or use **Covenant: Compile Rules from Instruction** to draft
-one. The **Set Up This Repo** command installs hooks and starts a task. To preserve existing
-Git hooks, follow the manual setup in the terminal first.
-[Git hook setup](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md#git-hooks)
+## Work in the sidebar
 
-## Features
-
-| | |
+| Section | What you can do |
 |---|---|
-| **Status bar** | Whether every rule holds, how many issues there are, or that tests are needed before the next commit |
-| **Rules panel** | The shield in the activity bar: each rule with its scope, the assumptions it was compiled under, its current violations, how often it has blocked the agent this task, and a log of recent blocks |
-| **Problems** | Each violation at the place it's about (see below) |
-| **Protected files** | A 🔒 badge in the explorer on every file a rule protects |
-| **Live updates** | The panel refreshes when an agent's hooks record something, when `covenant.yaml` changes, and when you save |
+| **Overview** | See setup and approval status, recheck the working tree, run declared tests, jump to findings, and read recent task activity. |
+| **Rules** | Search by rule ID, checker, description, or path. Use **Needs Review** to find current findings and rules that require human input. Expand a rule for its scope, assumptions, source, and block count. |
+| **Guide** | Follow the setup steps, edit or copy one of four starter prompts, and copy MCP setup or an agent handoff. |
 
-Problems are placed at:
+**Check Now** uses `covenant check --preview`. It leaves protected files in place and
+keeps the agent's block count unchanged. Checks also refresh when you save, when
+`covenant.yaml` changes, and when Covenant records activity. The status bar shows
+the task state. Covenant puts findings in **Problems** and marks protected files in
+the Explorer.
 
-- the changed function's or type's definition (Python, TypeScript, Go, Rust and Java);
-- the protected file;
-- the migration line;
-- the line with a secret, a skipped test, debug code or a suppressed warning;
-- the dependency in `package.json` or `pyproject.toml`;
-- or the rule in `covenant.yaml`.
+**Run Tests** uses the test commands declared in the rules and records the result.
+**Add a Rule** previews an additional instruction and asks you to confirm before
+updating the policy. Edit `covenant.yaml` directly for changes to existing rules,
+then start a new task to approve the new policy.
 
-> The editor uses `covenant check --preview` on refresh. That check leaves protected files
-> in place and leaves the agent's block count unchanged.
+## Use with a coding agent
 
-## Commands
+- **Claude Code** can use the project-local hooks installed by **Set Up Hooks**.
+- **VS Code / Copilot, Cursor, or Codex** can use **Copy MCP Setup** in **Guide**. Choose
+  a client, then merge the snippet into the indicated config on the machine running
+  the client. The snippet uses the selected Python executable and repository path.
+  [VS Code configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) · [Cursor configuration](https://cursor.com/docs/mcp) · [Codex configuration](https://developers.openai.com/codex/mcp)
+- **Any coding agent** can receive **Copy Agent Handoff** alongside your task. It asks
+  the agent to read the approved rules, use Covenant's tools when available, and report
+  the checks it actually ran.
 
-| Command | What it does |
-|---|---|
-| Covenant: Compile Rules from Instruction | Drafts `covenant.yaml` from a plain-English instruction, asks up to three questions, and shows the draft before writing it |
-| Covenant: Set Up This Repo (Hooks + Start) | Runs `covenant init` to install Git and Claude Code hooks and start a task |
-| Covenant: Add a Rule to the Current Task | `covenant amend`: compiles an extra instruction, shows the new rules, and approves them without resetting the task |
-| Covenant: Approve Rules and Start Task | Pins the current `covenant.yaml` and baseline commit and starts a fresh task |
-| Covenant: Run Tests | Runs the declared test command so a commit can follow |
-| Covenant: Check Now | Re-checks immediately |
-| Covenant: Open Rule | Jumps to a rule in `covenant.yaml` (from the panel) |
-| Covenant: Show Violation | Opens the place a violation is about (from the panel) |
-| Covenant: Show Activity Log | Shows the extension's log of checks and commands |
+MCP checks run when the agent calls the tools. Git hooks check Git operations regardless
+of which agent issued them. [Covenant integration guide](https://github.com/visweshdev/Covenant/blob/main/docs/agents.md)
 
 ## Settings
 
 | Setting | Default | What it does |
 |---|---|---|
-| `covenant.pythonPath` | `python` | A Python with Covenant installed |
-| `covenant.checkOnSave` | `true` | Re-check when you save |
-| `covenant.offlineCompile` | `false` | Compile without calling Claude |
+| `covenant.pythonPath` | `python` | Python executable with Covenant installed. **Select Python** can pick a workspace environment or browse to an executable. |
+| `covenant.checkOnSave` | `true` | Recheck after saving a file in the selected workspace folder. |
+| `covenant.offlineCompile` | `false` | When enabled, always compile locally. Otherwise, custom prompts let you choose local compilation or Claude. Starter prompts compile locally. |
 
 ## Build
 
-From the `vscode-extension` folder with Node.js 22, use the same commands as CI.
+Run these commands in `vscode-extension` with Node.js 22 or later.
 
 ```bash
 npm ci
 npm test
 npm run package
-code --install-extension covenant-0.1.2.vsix
 ```
 
-With Covenant installed into the Python on your PATH, run `npm run test:e2e` to download
-VS Code 1.100.3 and open a disposable repository in an isolated profile. On headless Linux,
-use `xvfb-run -a npm run test:e2e`. Pass an installed executable with
-`npm run test:e2e -- "/path/to/Code"` to use the same fixture with a different host.
-The suite checks activation, commands, diagnostics, protected-file status and preview behavior.
+Install the resulting VSIX using **Extensions: Install from VSIX…** in the Command
+Palette. A VSIX is also attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).
 
-A built `.vsix` is also attached to each [GitHub release](https://github.com/visweshdev/Covenant/releases).
+With Covenant installed in the Python on your PATH, run `npm run test:e2e` to test against
+VS Code 1.100.3 using a disposable repository and isolated profile. On headless Linux,
+run `xvfb-run -a npm run test:e2e`. To run against a specific installed executable, run
+`npm run compile` followed by `node out/test-e2e/run.js "/path/to/Code"`.

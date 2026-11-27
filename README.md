@@ -108,7 +108,7 @@ Say it in plain English; Covenant picks the checker.
 </tr>
 <tr>
   <td width="33%" valign="top"><h3>✅ GitHub</h3>An Action that checks changes against the base rules and can comment on findings.</td>
-  <td width="33%" valign="top"><h3>🧑‍💻 VS Code</h3>A rules panel, violations in Problems, and a 🔒 badge on every protected file.</td>
+  <td width="33%" valign="top"><h3>🧑‍💻 VS Code</h3>A workspace sidebar with live findings, searchable rules, starter prompts, and setup for coding agents.</td>
   <td width="33%" valign="top"><h3>🐳 Docker</h3><code>covenant sandbox</code> runs the agent with an HTTP(S) allowlist proxy and a separate hook state volume.</td>
 </tr>
 </table>
