@@ -9,6 +9,8 @@
   let tab = Object.hasOwn(tabs, previousTab) ? previousTab : "overview";
   const expanded = new Set();
   let guideExpanded;
+  let query = "";
+  let ruleFilter = "all";
 
   function element(tag, className, ...children) {
     const node = document.createElement(tag);
@@ -134,19 +136,60 @@
     return details;
   }
 
+  function rememberExpandedRules() {
+    for (const details of panel.querySelectorAll("details[data-rule]")) {
+      if (details.open) expanded.add(details.dataset.rule);
+      else expanded.delete(details.dataset.rule);
+    }
+  }
+
+  function refreshRuleList(list, count, state) {
+    const needsReview = new Set(state.reports.map((report) => report.id));
+    const words = query.toLowerCase().trim().split(/\s+/);
+    const filtered = state.status.rules.filter((rule) => {
+      const haystack = [rule.id, rule.text, rule.checker, rule.origin, ...(rule.scope ?? [])].join(" ").toLowerCase();
+      return words.every((word) => haystack.includes(word)) &&
+        (ruleFilter === "all" || rule.status !== "enforced" || needsReview.has(rule.id));
+    });
+    count.textContent = `${filtered.length} of ${state.status.rules.length} rules`;
+    const content = filtered.map((rule) => ruleRow(rule, state));
+    if (!content.length) content.push(element("p", "muted", state.status.rules.length ? "No rules match the current filters." : "This policy has no rules."));
+    list.replaceChildren(...content);
+  }
+
   function rulesContents(state) {
     if (!state.status) {
       return element("section", "section", element("h2", "", "Rules"),
         element("p", "muted", state.policy ? "Get a successful check to view your rules." : "Create a rules file to see your rules here."),
-        state.folder && !state.policy ? button("Draft Rules", "compile", true) : "");
+        state.folder && !state.policy && !state.missingPython ? button("Draft Rules", "compile", true) : "");
     }
     const rules = state.status.rules;
     const enforced = rules.filter((rule) => rule.status === "enforced").length;
+    const search = element("input", "rule-search");
+    search.id = "rule-search";
+    search.type = "search";
+    search.placeholder = "Find by rule, checker, or path";
+    search.value = query;
+    search.setAttribute("aria-label", "Search workspace rules");
+    const count = element("p", "muted rule-count");
+    count.setAttribute("role", "status");
+    const list = element("div", "rule-list");
+    search.addEventListener("input", () => {
+      rememberExpandedRules();
+      query = search.value;
+      refreshRuleList(list, count, state);
+    });
+    refreshRuleList(list, count, state);
+    const filters = element("div", "actions rule-filters", ...[["all", "All Rules"], ["review", "Needs Review"]].map(([id, label]) => {
+      const control = button(label, "filter", false, id);
+      control.setAttribute("aria-pressed", String(id === ruleFilter));
+      return control;
+    }));
     return element("section", "section",
       element("h2", "", "Workspace rules"),
       element("p", "muted", `${enforced} automatic · ${rules.length - enforced} need human input or review`),
       element("div", "section-actions actions", button("Open YAML", "openPolicy"), button("Add a Rule", "amend")),
-      element("div", "rule-list", ...rules.map((rule) => ruleRow(rule, state))),
+      search, filters, count, list,
     );
   }
 
@@ -194,13 +237,13 @@
       switcher.disabled = Boolean(state.busy);
       folder.append(switcher);
     }
-    const focus = document.activeElement?.dataset;
+    const active = document.activeElement;
+    const focus = active?.dataset;
+    const restoreSearch = active?.id === "rule-search";
+    const selection = restoreSearch ? [active.selectionStart, active.selectionEnd] : [];
     const setup = panel.querySelector("details[data-setup]");
     if (setup) guideExpanded = setup.open;
-    for (const details of panel.querySelectorAll("details[data-rule]")) {
-      if (details.open) expanded.add(details.dataset.rule);
-      else expanded.delete(details.dataset.rule);
-    }
+    rememberExpandedRules();
     const nav = element("nav", "tabs", ...Object.entries(tabs).map(([id, label]) => {
       const control = button(label, "tab", false, id);
       control.setAttribute("aria-pressed", String(tab === id));
@@ -218,6 +261,11 @@
     panel.replaceChildren(folder, nav, progress, contents);
     if (focus?.action) [...panel.querySelectorAll("button[data-action]")]
       .find((control) => control.dataset.action === focus.action && control.dataset.value === focus.value)?.focus();
+    if (restoreSearch) {
+      const search = document.getElementById("rule-search");
+      search?.focus();
+      if (search && selection[0] !== null) search.setSelectionRange(...selection);
+    }
     if (focus?.setup) panel.querySelector("summary[data-setup]")?.focus();
     if (focus?.rule) [...panel.querySelectorAll("details[data-rule]")]
       .find((details) => details.dataset.rule === focus.rule)?.querySelector("summary").focus();
@@ -231,6 +279,9 @@
       tab = value;
       vscode.setState({ tab });
       render();
+    } else if (action === "filter") {
+      ruleFilter = value;
+      render();
     } else vscode.postMessage({ action, value, revision, workspaceId });
   });
   window.addEventListener("message", ({ data }) => {
@@ -239,6 +290,8 @@
       panel.replaceChildren();
       expanded.clear();
       guideExpanded = undefined;
+      query = "";
+      ruleFilter = "all";
     }
     state = data.state;
     workspaceId = data.workspaceId;

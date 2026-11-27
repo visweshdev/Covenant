@@ -114,3 +114,18 @@ button.row-button:hover { background: var(--vscode-list-hoverBackground); }
 .guide-setup summary { font-weight: 650; cursor: pointer; }
 .guide-steps { display: grid; gap: 9px; padding-inline-start: 18px; margin: 8px 0 10px; }
 .guide-steps strong { display: block; }
+
+.rule-search {
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  font: inherit;
+}
+.rule-search::placeholder { color: var(--vscode-input-placeholderForeground); }
+.rule-filters { margin: 8px 0; }
+.rule-filters button[aria-pressed="true"] { border-color: var(--vscode-focusBorder); }
+.rule-count { font-size: 0.92em; margin-bottom: 4px; }
+.rule-list > p { padding-top: 5px; }
