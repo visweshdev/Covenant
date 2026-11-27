@@ -97,6 +97,7 @@ class Controller implements vscode.Disposable {
   private activeAction?: string;
   private error?: string;
   private missingPython?: boolean;
+  private checkedAt?: string;
 
   constructor(readonly folder: vscode.WorkspaceFolder, readonly sidebar: Sidebar) {
     this.cli = new CovenantCli(this.repo, () => setting(folder, "pythonPath", "python"));
@@ -182,7 +183,7 @@ class Controller implements vscode.Disposable {
   }
 
   private clearPreview(): void {
-    this.status = this.preview = undefined;
+    this.status = this.preview = this.checkedAt = undefined;
     this.diagnostics.clear();
     this.decorations.refresh();
   }
@@ -191,7 +192,7 @@ class Controller implements vscode.Disposable {
     this.sidebar.update({
       folder: this.folder.name, folderKey: this.folder.uri.toString(), canSwitch: localFolders().length > 1,
       policy: fs.existsSync(this.covenantPath), status: this.status,
-      preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction,
+      preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction, checkedAt: this.checkedAt,
     });
   }
 
@@ -231,6 +232,7 @@ class Controller implements vscode.Disposable {
       }
       this.status = status;
       this.preview = preview;
+      this.checkedAt = preview ? new Date().toISOString() : undefined;
       this.warnedNotInstalled = false;
       this.watchState(this.status.state_dir);
     } catch (err) {

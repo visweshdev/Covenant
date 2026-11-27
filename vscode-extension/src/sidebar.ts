@@ -12,6 +12,7 @@ export interface SidebarState {
   error?: string;
   missingPython?: boolean;
   busy?: string;
+  checkedAt?: string;
   status?: Status;
   preview?: Decision;
 }
@@ -58,7 +59,13 @@ export class Sidebar implements vscode.WebviewViewProvider {
         status: status && {
           has_session: status.has_session,
           repo_covenant_changed: status.repo_covenant_changed,
-          testCount: status.test_commands.length,
+          testCommands: status.test_commands,
+          eventCount: status.trace_length,
+          startedAt: status.session.started_at,
+          recent: status.recent_reports.slice(-8).reverse().map((entry) => ({
+            event: entry.event, time: entry.ts, allowed: entry.allowed,
+            rules: [...new Set(entry.reports.map((report) => report.violation))],
+          })),
           rules: status.clauses.map(({ id, source_span, status: ruleStatus, checker, on_violation, scope, assumptions, origin }) => ({
             id, text: source_span, status: ruleStatus ?? "enforced", checker,
             response: on_violation, scope, assumptions, origin, blocks: status.block_counts[id] ?? 0,

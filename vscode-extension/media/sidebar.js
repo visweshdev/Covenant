@@ -9,6 +9,7 @@
   let tab = Object.hasOwn(tabs, previousTab) ? previousTab : "overview";
   const expanded = new Set();
   let guideExpanded;
+  let activityExpanded = false;
   let query = "";
   let ruleFilter = "all";
 
@@ -71,12 +72,12 @@
     if (state.status.repo_covenant_changed) {
       return statusCard("warning", "Review required", "Rules changed on disk",
         "The approved rules still apply. Review covenant.yaml before starting a new task.",
-        button("Open YAML", "openPolicy", true), button("Start New Task", "approve"));
+        button("Open YAML", "openPolicy", true), button("Start New Task", "approve"), button("Check Now", "refresh"));
     }
     const issues = state.reports.filter((report) => !report.reminder);
     const reminders = state.reports.filter((report) => report.reminder);
     const actions = [button("Check Now", "refresh", true)];
-    if (state.status.testCount) actions.push(button("Run Tests", "test"));
+    if (state.status.testCommands.length) actions.push(button("Run Tests", "test"));
     const card = issues.length
       ? statusCard("bad", "Review current changes", `${issues.length} ${issues.length === 1 ? "issue" : "issues"} to review`,
         "Open a finding to jump to the relevant file or rule.", ...actions)
@@ -98,6 +99,27 @@
     return element("section", "section", heading, element("ul", "rows", ...rows));
   }
 
+  function taskActivity(status) {
+    const events = status.eventCount === 1 ? "1 recorded event" : `${status.eventCount} recorded events`;
+    const time = (value) => new Date(value).toLocaleString();
+    const rows = status.recent.map((entry) => element("li", "",
+      element("strong", "", `${entry.allowed ? "Reported" : "Blocked"} · ${entry.event}`),
+      element("p", "muted", `${entry.rules.join(", ")} · ${time(entry.time)}`)));
+    const summary = element("summary", "", "Task activity");
+    summary.dataset.activity = "true";
+    const activity = element("details", "task-activity", summary,
+      element("p", "muted", status.startedAt ? `Started ${time(status.startedAt)} · ${events}` : events),
+      status.testCommands.length ? element("ul", "test-commands",
+        ...status.testCommands.map((command) => element("li", "", element("code", "", command)))) : "",
+      rows.length ? element("ul", "history", ...rows) : element("p", "muted", "No findings recorded by the hooks or CLI."),
+      element("div", "actions section-actions", button("Show Output", "output"),
+        button("Set Up Hooks", "init"), button("Start New Task", "approve")),
+    );
+    activity.dataset.activity = "true";
+    activity.open = activityExpanded;
+    return activity;
+  }
+
   function overviewContents(state) {
     const issues = state.reports.filter((report) => !report.reminder);
     const reminders = state.reports.filter((report) => report.reminder);
@@ -109,6 +131,8 @@
     }
     if (issues.length) contents.push(findings("Issues", issues));
     if (reminders.length) contents.push(findings("Reminders", reminders));
+    if (state.checkedAt) contents.push(element("p", "muted last-check", `Last checked ${new Date(state.checkedAt).toLocaleTimeString()}`));
+    if (state.status?.has_session) contents.push(taskActivity(state.status));
     return element("div", "stack", ...contents);
   }
 
@@ -243,6 +267,8 @@
     const selection = restoreSearch ? [active.selectionStart, active.selectionEnd] : [];
     const setup = panel.querySelector("details[data-setup]");
     if (setup) guideExpanded = setup.open;
+    const activity = panel.querySelector("details[data-activity]");
+    if (activity) activityExpanded = activity.open;
     rememberExpandedRules();
     const nav = element("nav", "tabs", ...Object.entries(tabs).map(([id, label]) => {
       const control = button(label, "tab", false, id);
@@ -266,6 +292,7 @@
       search?.focus();
       if (search && selection[0] !== null) search.setSelectionRange(...selection);
     }
+    if (focus?.activity) panel.querySelector("summary[data-activity]")?.focus();
     if (focus?.setup) panel.querySelector("summary[data-setup]")?.focus();
     if (focus?.rule) [...panel.querySelectorAll("details[data-rule]")]
       .find((details) => details.dataset.rule === focus.rule)?.querySelector("summary").focus();
@@ -290,6 +317,7 @@
       panel.replaceChildren();
       expanded.clear();
       guideExpanded = undefined;
+      activityExpanded = false;
       query = "";
       ruleFilter = "all";
     }

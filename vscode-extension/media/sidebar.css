@@ -129,3 +129,11 @@ button.row-button:hover { background: var(--vscode-list-hoverBackground); }
 .rule-filters button[aria-pressed="true"] { border-color: var(--vscode-focusBorder); }
 .rule-count { font-size: 0.92em; margin-bottom: 4px; }
 .rule-list > p { padding-top: 5px; }
+
+.last-check { font-size: 0.91em; }
+.task-activity { border-top: 1px solid var(--vscode-panel-border, transparent); padding-top: 8px; }
+.task-activity summary { font-weight: 650; cursor: pointer; }
+.task-activity > p { margin-top: 6px; }
+.test-commands, .history { list-style: none; padding: 0; margin: 8px 0; }
+.history li { padding: 5px 0; border-top: 1px solid var(--vscode-panel-border, transparent); }
+.test-commands code { font-family: var(--vscode-editor-font-family); color: var(--vscode-textPreformat-foreground, var(--vscode-foreground)); }
