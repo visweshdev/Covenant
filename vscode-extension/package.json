@@ -92,6 +92,10 @@
       {
         "command": "covenant.openPolicy",
         "title": "Covenant: Open Rules File"
+      },
+      {
+        "command": "covenant.copyStarter",
+        "title": "Covenant: Copy Starter Prompt"
       }
     ],
     "menus": {

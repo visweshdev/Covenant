@@ -5,6 +5,7 @@ import { CovenantCli, CovenantCliError } from "./cli";
 import { preservePolicies, readPolicy, writeDraft } from "./draft";
 import { protectingClause } from "./glob";
 import { clauseLine, FileAccess, isReminder, locate, message } from "./locate";
+import { starters } from "./prompts";
 import { selectPython, setting } from "./python";
 import { Sidebar } from "./sidebar";
 import { workspaceRelative } from "./workspace-path";
@@ -482,6 +483,14 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
     register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
     register("covenant.selectPython", (ctrl) => selectPython(ctrl.folder)),
     vscode.commands.registerCommand("covenant.showLog", () => output.show()),
+    vscode.commands.registerCommand("covenant.copyStarter", async () => {
+      const pick = await vscode.window.showQuickPick(starters.map((starter) => ({
+        label: starter.title, description: starter.goal, detail: starter.instruction, starter,
+      })), { title: "Covenant: Copy Starter Prompt", matchOnDetail: true, matchOnDescription: true });
+      if (!pick) return;
+      await vscode.env.clipboard.writeText(pick.starter.instruction);
+      void vscode.window.showInformationMessage("Covenant starter prompt copied.");
+    }),
     vscode.commands.registerCommand("covenant.copyInstall", async () => {
       await vscode.env.clipboard.writeText("python -m pip install covenant-agents");
       void vscode.window.showInformationMessage("Covenant install command copied.");
