@@ -536,8 +536,13 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
       if (code === 0) void vscode.window.showInformationMessage("Covenant task started.");
       else void ctrl.failure("The task could not start.");
     })),
-    register("covenant.init", (ctrl) => ctrl.act("Set up repository", async () => {
-      const code = await ctrl.runLogged("Covenant: setting up hooks…", ["init"]);
+    register("covenant.init", (ctrl) => ctrl.act("Set up hooks", async () => {
+      const setup = await vscode.window.showQuickPick([
+        { label: "Git hooks", description: "Checks commits and pushes in this repository", args: ["--no-claude"] },
+        { label: "Git and Claude Code hooks", description: "Also checks Claude Code actions in this project", args: ["--local"] },
+      ], { title: "Covenant: Set Up Hooks and Start Task", ignoreFocusOut: true });
+      if (!setup || !ctrl.isOpen) return;
+      const code = await ctrl.runLogged("Covenant: setting up hooks…", ["init", ...setup.args]);
       if (code !== 0) void ctrl.failure("Repository setup failed.");
       else void vscode.window.showInformationMessage("Covenant task started. See the output for hook setup details.");
     })),

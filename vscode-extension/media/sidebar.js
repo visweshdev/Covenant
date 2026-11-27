@@ -7,6 +7,7 @@
   const previousTab = vscode.getState()?.tab;
   let tab = Object.hasOwn(tabs, previousTab) ? previousTab : "overview";
   const expanded = new Set();
+  let guideExpanded;
 
   function element(tag, className, ...children) {
     const node = document.createElement(tag);
@@ -61,8 +62,8 @@
     if (!state.status) return element("p", "muted", "Checking workspace…");
     if (!state.status.has_session) {
       return statusCard("neutral", "Ready to start", "Your rules are ready",
-        "Start a task to pin these rules and record the current Git baseline.", button("Start Task", "approve", true),
-        button("Set Up Hooks", "init"), button("Open YAML", "openPolicy"));
+        "Start a task to pin these rules and record the current Git baseline.", button("Set Up Hooks", "init", true),
+        button("Start Task", "approve"), button("Open YAML", "openPolicy"));
     }
     if (state.status.repo_covenant_changed) {
       return statusCard("warning", "Review required", "Rules changed on disk",
@@ -98,6 +99,11 @@
     const issues = state.reports.filter((report) => !report.reminder);
     const reminders = state.reports.filter((report) => report.reminder);
     const contents = [overview(state)];
+    if (!state.policy && state.folder && !state.restricted && !state.error) {
+      contents.push(element("section", "section setup-note", element("h2", "", "From instruction to checks"),
+        element("p", "muted", "Review the draft, set up hooks for your agent, then check changes as you work."),
+        button("Read Setup Guide", "tab", false, "guide")));
+    }
     if (issues.length) contents.push(findings("Issues", issues));
     if (reminders.length) contents.push(findings("Reminders", reminders));
     return element("div", "stack", ...contents);
@@ -161,9 +167,24 @@
     );
   }
 
+  function guideContents(state) {
+    const setup = element("details", "guide-setup", element("summary", "", "Set up your first task"),
+      element("ol", "guide-steps",
+        element("li", "", element("strong", "", "Draft your rules"), element("p", "muted", "Write an instruction or edit a starter prompt below. Review the generated YAML before saving.")),
+        element("li", "", element("strong", "", "Choose how to enforce"), element("p", "muted", "Set Up Hooks installs Git checks, with an option for Claude Code. Start Task alone pins the rules and Git baseline for checks.")),
+        element("li", "", element("strong", "", "Review findings before a commit"), element("p", "muted", "Open findings from Overview or Problems. Run Tests records the result of the test commands declared in your rules.")),
+      ));
+    setup.open = guideExpanded ?? !state.status?.has_session;
+    setup.dataset.setup = "true";
+    setup.querySelector("summary").dataset.setup = "true";
+    return element("div", "stack", setup, promptLibrary(state));
+  }
+
   function render() {
     const folder = state.folder ? element("p", "workspace", state.folder) : document.createTextNode("");
     const focus = document.activeElement?.dataset;
+    const setup = panel.querySelector("details[data-setup]");
+    if (setup) guideExpanded = setup.open;
     for (const details of panel.querySelectorAll("details[data-rule]")) {
       if (details.open) expanded.add(details.dataset.rule);
       else expanded.delete(details.dataset.rule);
@@ -174,7 +195,7 @@
       return control;
     }));
     nav.setAttribute("aria-label", "Covenant sections");
-    const contents = { rules: rulesContents, guide: promptLibrary, overview: overviewContents }[tab](state);
+    const contents = { rules: rulesContents, guide: guideContents, overview: overviewContents }[tab](state);
     if (state.busy) {
       for (const control of contents.querySelectorAll("button[data-action]")) {
         if (["compile", "approve", "init", "python", "test", "amend", "draftStarter"].includes(control.dataset.action)) control.disabled = true;
@@ -185,6 +206,7 @@
     panel.replaceChildren(folder, nav, progress, contents);
     if (focus?.action) [...panel.querySelectorAll("button[data-action]")]
       .find((control) => control.dataset.action === focus.action && control.dataset.value === focus.value)?.focus();
+    if (focus?.setup) panel.querySelector("summary[data-setup]")?.focus();
     if (focus?.rule) [...panel.querySelectorAll("details[data-rule]")]
       .find((details) => details.dataset.rule === focus.rule)?.querySelector("summary").focus();
   }

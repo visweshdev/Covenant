@@ -62,7 +62,7 @@
       },
       {
         "command": "covenant.compile",
-        "title": "Covenant: Compile Rules from Instruction"
+        "title": "Covenant: Draft Rules"
       },
       {
         "command": "covenant.amend",
@@ -71,7 +71,7 @@
       },
       {
         "command": "covenant.init",
-        "title": "Covenant: Set Up This Repo (Hooks + Start)"
+        "title": "Covenant: Set Up Hooks and Start Task"
       },
       {
         "command": "covenant.openRule",

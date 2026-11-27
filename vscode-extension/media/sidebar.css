@@ -107,3 +107,9 @@ button.row-button:hover { background: var(--vscode-list-hoverBackground); }
   border-inline-start: 2px solid var(--vscode-textBlockQuote-border);
   color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
 }
+
+.setup-note .secondary { margin-top: 9px; }
+.guide-setup { padding: 9px 10px; border: 1px solid var(--vscode-panel-border, transparent); border-inline-start: 2px solid var(--vscode-textBlockQuote-border); }
+.guide-setup summary { font-weight: 650; cursor: pointer; }
+.guide-steps { display: grid; gap: 9px; padding-inline-start: 18px; margin: 8px 0 10px; }
+.guide-steps strong { display: block; }
