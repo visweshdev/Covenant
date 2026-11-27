@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -80,6 +81,14 @@ class ProtectedFiles implements vscode.FileDecorationProvider {
   }
 }
 
+interface ReviewedDraft {
+  uri: vscode.Uri;
+  content: string;
+  yaml: string;
+  original?: string;
+  writable: boolean;
+}
+
 class Controller implements vscode.Disposable {
   readonly cli: CovenantCli;
   readonly diagnostics = vscode.languages.createDiagnosticCollection("covenant");
@@ -87,6 +96,7 @@ class Controller implements vscode.Disposable {
   readonly decorations: ProtectedFiles;
   status?: Status;
   preview?: Decision;
+  draft?: ReviewedDraft;
   private running?: Promise<void>;
   private again = false;
   private stateWatcher?: vscode.FileSystemWatcher;
@@ -143,8 +153,9 @@ class Controller implements vscode.Disposable {
     try {
       await action();
     } catch (error) {
-      output.appendLine(error instanceof Error ? error.message : String(error));
-      void this.failure(`${label} failed.`);
+      const detail = error instanceof Error ? error.message : String(error);
+      output.appendLine(detail);
+      void this.failure(`${label} failed. ${detail}`);
     } finally {
       this.activeAction = undefined;
       if (this.isOpen) this.publish();
@@ -192,7 +203,7 @@ class Controller implements vscode.Disposable {
     this.sidebar.update({
       folder: this.folder.name, folderKey: this.folder.uri.toString(), canSwitch: localFolders().length > 1,
       policy: fs.existsSync(this.covenantPath), status: this.status,
-      preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction, checkedAt: this.checkedAt,
+      preview: this.preview, error: this.error, missingPython: this.missingPython, busy: this.activeAction, checkedAt: this.checkedAt, draft: this.draft ? (this.draft.writable ? "ready" : "review") : undefined,
     });
   }
 
@@ -206,7 +217,7 @@ class Controller implements vscode.Disposable {
       this.missingPython = undefined;
       this.publish();
       this.statusBar.text = "$(shield) Covenant: set up";
-      this.statusBar.tooltip = "No covenant.yaml. Click to compile rules from an instruction.";
+      this.statusBar.tooltip = "Open the Covenant workspace to draft rules or use a starter prompt.";
       this.statusBar.command = "covenant.rules.focus";
       this.statusBar.show();
       const attempt = await this.cli.run(["--version"], 10_000);
@@ -404,26 +415,33 @@ async function compileCommand(ctrl: Controller, starter?: Starter): Promise<void
     "",
     "",
   ].join("\n");
-  const doc = await vscode.workspace.openTextDocument({ language: "yaml", content: header + yaml });
-  await vscode.window.showTextDocument(doc, { preview: true });
-  if (errors.length || !result.covenant.clauses.length) {
+  ctrl.draft = {
+    uri: vscode.Uri.from({ scheme: "covenant-draft", path: `/Covenant draft ${randomUUID().slice(0, 8)}.yaml` }),
+    content: header + yaml, yaml, original, writable: errors.length === 0 && result.covenant.clauses.length > 0,
+  };
+  ctrl.publish();
+  await vscode.window.showTextDocument(ctrl.draft.uri, { preview: true, preserveFocus: false });
+  if (!ctrl.draft.writable) {
     const guidance = errors.length ? "Fix the errors listed in the draft and try again." : "Add a concrete rule and draft again.";
     void vscode.window.showWarningMessage(`Covenant: ${guidance}`);
-    return;
   }
-  const choice = await vscode.window.showInformationMessage(
-    original === undefined ? "Write the reviewed draft to covenant.yaml?" : "Replace covenant.yaml with the reviewed draft?",
-    { modal: true, detail: ctrl.folder.name },
-    "Write Rules",
-  );
-  if (choice !== "Write Rules" || !ctrl.isOpen) return;
+}
+
+async function saveDraft(ctrl: Controller): Promise<void> {
+  const draft = ctrl.draft;
+  if (!draft?.writable) return;
+  if (draft.original !== undefined) {
+    const choice = await vscode.window.showWarningMessage("Replace covenant.yaml with the reviewed draft?",
+      { modal: true, detail: ctrl.folder.name }, "Replace Rules");
+    if (choice !== "Replace Rules" || !ctrl.isOpen || ctrl.draft !== draft) return;
+  }
   if (vscode.workspace.textDocuments.some((document) => document.uri.fsPath === ctrl.covenantPath && document.isDirty)) {
     throw new Error("Save or discard the unsaved changes in covenant.yaml before writing a draft.");
   }
-  writeDraft(ctrl.covenantPath, yaml, original);
+  writeDraft(ctrl.covenantPath, draft.yaml, draft.original);
+  ctrl.draft = undefined;
   await vscode.window.showTextDocument(vscode.Uri.file(ctrl.covenantPath));
   void vscode.window.showInformationMessage("Covenant rules saved to covenant.yaml.");
-
 }
 
 async function amendCommand(ctrl: Controller): Promise<void> {
@@ -505,6 +523,12 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
 
   context.subscriptions.push(
     output,
+    vscode.workspace.registerTextDocumentContentProvider("covenant-draft", {
+      provideTextDocumentContent(uri) {
+        const draft = controller?.draft;
+        return draft?.uri.toString() === uri.toString() ? draft.content : "";
+      },
+    }),
     { dispose: () => controller?.dispose() },
     vscode.workspace.onDidChangeWorkspaceFolders(rebind),
     vscode.workspace.onDidGrantWorkspaceTrust(rebind),
@@ -532,6 +556,13 @@ export function activate(context: vscode.ExtensionContext): CovenantApi {
       const starter = id === undefined ? await chooseStarter() : starters.find((item) => item.id === id);
       if (starter && ctrl.isOpen) await compileCommand(ctrl, starter);
     })),
+    register("covenant.openDraft", (ctrl) => ctrl.draft && vscode.window.showTextDocument(ctrl.draft.uri, { preview: true })),
+    register("covenant.saveDraft", (ctrl) => ctrl.act("Write rules", () => saveDraft(ctrl))),
+    register("covenant.discardDraft", (ctrl) => {
+      if (ctrl.busy) return;
+      ctrl.draft = undefined;
+      ctrl.publish();
+    }),
     register("covenant.amend", (ctrl) => ctrl.act("Add a rule", () => amendCommand(ctrl))),
     register("covenant.copyMcp", async (ctrl) => {
       const pick = await vscode.window.showQuickPick(

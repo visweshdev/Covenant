@@ -5,9 +5,10 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { CovenantCli } from "../src/cli";
 import type { CovenantApi } from "../src/extension";
-import type { Status } from "../src/types";
+import { starters } from "../src/prompts";
+import type { CompileResult, Status } from "../src/types";
 
-async function waitFor<T>(what: string, probe: () => T | undefined, timeoutMs = 90_000): Promise<T> {
+async function waitFor<T>(what: string, probe: () => T | undefined, timeoutMs = 20_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = probe();
@@ -29,7 +30,11 @@ async function verifyExtension(): Promise<void> {
   assert.ok(api, "extension did not activate on a repo with covenant.yaml");
 
   const commands = await vscode.commands.getCommands(true);
-  for (const c of ["covenant.refresh", "covenant.compile", "covenant.approve", "covenant.runTests", "covenant.init", "covenant.amend"]) {
+  for (const c of [
+    "covenant.refresh", "covenant.compile", "covenant.approve", "covenant.runTests", "covenant.init", "covenant.amend",
+    "covenant.openPolicy", "covenant.draftStarter", "covenant.copyStarter", "covenant.selectPython", "covenant.selectWorkspace",
+    "covenant.copyMcp", "covenant.copyHandoff", "covenant.openDraft", "covenant.saveDraft", "covenant.discardDraft",
+  ]) {
     assert.ok(commands.includes(c), `command ${c} missing`);
   }
 
@@ -67,8 +72,45 @@ async function verifyExtension(): Promise<void> {
   const usersAfter = (await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(repo, "data", "users.json")))).toString();
   assert.equal(usersAfter, usersBefore);
 
-  // The Rules view opens.
+  await vscode.commands.executeCommand("covenant.openRule", "C3");
+  assert.equal(vscode.window.activeTextEditor?.document.fileName, path.join(repo, "covenant.yaml"));
+  await vscode.commands.executeCommand("covenant.openViolation", state.preview!.reports.find((report) => report.violation === "C1"));
+  assert.equal(vscode.window.activeTextEditor?.document.fileName, path.join(repo, "mylib", "core.py"));
   await vscode.commands.executeCommand("covenant.rules.focus");
+
+  if (process.env.COVENANT_E2E_FIXTURE === "1") {
+    await verifyStarters(cli);
+    // A missing policy must clear violations, badges, and the previous task state.
+    const from = vscode.Uri.file(path.join(repo, "covenant.yaml"));
+    const to = vscode.Uri.file(path.join(repo, "covenant-test-backup.yaml"));
+    await vscode.workspace.fs.rename(from, to);
+    try {
+      await api.refresh();
+      assert.equal(api.state().status, undefined);
+      assert.equal(api.state().protectedBy("data/users.json"), undefined);
+      assert.equal(diag("mylib/core.py").length, 0);
+      assert.match(api.state().statusBar, /set up/i);
+    } finally {
+      await vscode.workspace.fs.rename(to, from);
+    }
+    await api.refresh();
+    assert.equal(api.state().status?.has_session, true);
+  }
+}
+
+async function verifyStarters(cli: CovenantCli): Promise<void> {
+  const expected = [
+    ["api_surface_diff", "trace_monitor"],
+    ["test_guard", "trace_monitor"],
+    ["dependency_diff", "no_debug_code", "trace_monitor"],
+    ["effect_monitor", "secret_scan"],
+  ];
+  for (const [index, starter] of starters.entries()) {
+    const draft = await cli.json<CompileResult>(["compile", "--offline", "--unattended", "--format", "json", "--dry-run", "--", starter.instruction], 30_000, 3);
+    assert.ok(draft.issues.every((issue) => issue.level !== "error"), JSON.stringify(draft.issues));
+    const checkers = draft.covenant.clauses.map((clause) => clause.checker);
+    for (const checker of expected[index]) assert.ok(checkers.includes(checker), `${starter.id}: expected ${checker}, got ${checkers}`);
+  }
 }
 
 export async function run(): Promise<void> {

@@ -11,7 +11,8 @@ export function readPolicy(file: string): string | undefined {
 
 export function preservePolicies(yaml: string, current?: string): string {
   if (current === undefined) return yaml;
-  const inherits: unknown = parse(current, { merge: true })?.covenant?.extends;
+  const data = parse(current, { merge: true });
+  const inherits: unknown = (data?.covenant ?? data)?.extends;
   if (inherits === undefined || (Array.isArray(inherits) && inherits.length === 0)) return yaml;
   if (!Array.isArray(inherits) || !inherits.every((item) => typeof item === "string")) {
     throw new Error("Fix the existing policy's extends list before replacing it.");

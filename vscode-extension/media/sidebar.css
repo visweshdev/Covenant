@@ -137,3 +137,5 @@ button.row-button:hover { background: var(--vscode-list-hoverBackground); }
 .test-commands, .history { list-style: none; padding: 0; margin: 8px 0; }
 .history li { padding: 5px 0; border-top: 1px solid var(--vscode-panel-border, transparent); }
 .test-commands code { font-family: var(--vscode-editor-font-family); color: var(--vscode-textPreformat-foreground, var(--vscode-foreground)); }
+
+.draft-panel { margin-bottom: 12px; }

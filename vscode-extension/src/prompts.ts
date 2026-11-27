@@ -21,7 +21,7 @@ export const starters = [
     id: "sensitive-data",
     title: "Protect data and credentials",
     goal: "Guard data/ from destructive changes and keep secrets out of commits.",
-    instruction: "Do not delete or overwrite files in data/. Do not commit secrets.",
+    instruction: "Refactor repository code. Do not delete or overwrite files in data/. Do not commit secrets.",
   },
 ] as const;
 

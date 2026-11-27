@@ -112,6 +112,18 @@
       {
         "command": "covenant.selectWorkspace",
         "title": "Covenant: Select Workspace Folder"
+      },
+      {
+        "command": "covenant.openDraft",
+        "title": "Covenant: Open Pending Draft"
+      },
+      {
+        "command": "covenant.saveDraft",
+        "title": "Covenant: Write Reviewed Draft"
+      },
+      {
+        "command": "covenant.discardDraft",
+        "title": "Covenant: Discard Pending Draft"
       }
     ],
     "menus": {

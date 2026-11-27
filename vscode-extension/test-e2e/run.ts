@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const resultFile = path.join(temp, "suite-result");
   try {
     const repo = givenRepo ? path.resolve(givenRepo) : path.join(temp, "repo");
-    const state = givenRepo ? {} : { COVENANT_HOME: path.join(temp, "state"), COVENANT_SNAPSHOTS: "1" };
+    const state = givenRepo ? {} : { COVENANT_HOME: path.join(temp, "state"), COVENANT_SNAPSHOTS: "1", COVENANT_E2E_FIXTURE: "1" };
     const python = givenRepo ? undefined : execFileSync("python", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
     if (python) await makeFixture(repo, python, { ...process.env, ...state });
     const executable = codeExe ? path.resolve(codeExe) : await downloadAndUnzipVSCode(vscodeVersion);

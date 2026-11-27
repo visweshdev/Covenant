@@ -276,15 +276,22 @@
       return control;
     }));
     nav.setAttribute("aria-label", "Covenant sections");
+    const draftActions = [button("Open Draft", "openDraft")];
+    if (state.draft === "ready") draftActions.unshift(button("Write Rules", "saveDraft", true));
+    draftActions.push(button("Discard", "discardDraft"));
+    const draft = state.draft ? statusCard(state.draft === "ready" ? "neutral" : "warning", "Rules draft",
+      state.draft === "ready" ? "Ready for your review" : "Draft needs changes",
+      state.draft === "ready" ? "Read the YAML before writing it to your workspace." : "Open the draft for details, then revise your instruction.",
+      ...draftActions) : "";
     const contents = { rules: rulesContents, guide: guideContents, overview: overviewContents }[tab](state);
     if (state.busy) {
-      for (const control of contents.querySelectorAll("button[data-action]")) {
-        if (["compile", "approve", "init", "python", "test", "amend", "draftStarter"].includes(control.dataset.action)) control.disabled = true;
+      for (const control of [...contents.querySelectorAll("button[data-action]"), ...draftActions]) {
+        if (["compile", "approve", "init", "python", "test", "amend", "draftStarter", "saveDraft", "discardDraft"].includes(control.dataset.action)) control.disabled = true;
       }
     }
     const progress = element("p", state.busy ? "progress" : "visually-hidden", state.busy ? `${state.busy} in progress…` : "");
     progress.setAttribute("role", "status");
-    panel.replaceChildren(folder, nav, progress, contents);
+    panel.replaceChildren(folder, nav, progress, draft ? element("div", "draft-panel", draft) : "", contents);
     if (focus?.action) [...panel.querySelectorAll("button[data-action]")]
       .find((control) => control.dataset.action === focus.action && control.dataset.value === focus.value)?.focus();
     if (restoreSearch) {

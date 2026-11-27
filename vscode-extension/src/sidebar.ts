@@ -13,6 +13,7 @@ export interface SidebarState {
   missingPython?: boolean;
   busy?: string;
   checkedAt?: string;
+  draft?: "ready" | "review";
   status?: Status;
   preview?: Decision;
 }
@@ -28,6 +29,9 @@ const commands = new Map([
   ["python", "covenant.selectPython"],
   ["amend", "covenant.amend"],
   ["test", "covenant.runTests"],
+  ["openDraft", "covenant.openDraft"],
+  ["saveDraft", "covenant.saveDraft"],
+  ["discardDraft", "covenant.discardDraft"],
   ["openPolicy", "covenant.openPolicy"],
   ["copyInstall", "covenant.copyInstall"],
   ["copyMcp", "covenant.copyMcp"],
