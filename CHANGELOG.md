@@ -6,6 +6,13 @@
 
 ## Unreleased
 
+- Covenant for VS Code 0.1.3 adds a workspace sidebar with live findings, searchable
+  rules, task activity, and an in-editor guide. Four starter prompts draft rules
+  locally and let you review the YAML before writing it.
+- The extension can switch folders in multi-root workspaces, select Python per folder,
+  set up Git or Claude Code hooks, and copy an agent handoff or MCP setup for VS Code,
+  Cursor, and Codex.
+
 - The base install uses the offline compiler and Claude Code login without the Anthropic
   SDK. Install the `anthropic` extra to compile or review through the API.
 - The Git hook installers refuse to replace existing hooks or install into a repo using
